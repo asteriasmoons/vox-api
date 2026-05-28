@@ -1,0 +1,1 @@
+{"version":3,"file":"DailyPromptUsage.d.ts","sourceRoot":"","sources":["../../src/models/DailyPromptUsage.ts"],"names":[],"mappings":"AAAA,OAAO,EAAiB,QAAQ,EAAE,MAAM,UAAU,CAAC;AAEnD,MAAM,WAAW,mBAAoB,SAAQ,QAAQ;IACnD,MAAM,EAAE,MAAM,CAAC;IACf,OAAO,EAAE,MAAM,CAAC;IAChB,KAAK,EAAE,MAAM,CAAC;IACd,SAAS,EAAE,IAAI,CAAC;CACjB;AAaD,eAAO,MAAM,gBAAgB;;;;OAG5B,CAAC"}

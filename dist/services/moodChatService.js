@@ -1,10 +1,7 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.runMoodChat = runMoodChat;
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-
-export interface ChatMessage {
-  role: "user" | "model";
-  parts: { text: string }[];
-}
-
 const SYSTEM_PROMPT = `You are a safe, warm, and completely non-judgmental emotional support companion inside a wellness app called Lunixia.
 
 Your only purpose is to hold space for this person to talk through whatever they are feeling. Nothing more.
@@ -34,47 +31,42 @@ Rules you must follow at all times, without exception:
 11. This session lasts 10 minutes. Near the end, if they mention wrapping up or the session is clearly winding down, gently close with something affirming — not a summary, just a moment of acknowledgment that they showed up for themselves.
 
 You are not an AI assistant trying to be helpful in the traditional sense. You are a presence. You are here.`;
-
 // Convert from Gemini-style {role, parts} to Groq/OpenAI-style {role, content}
-function toGroqMessages(messages: ChatMessage[]) {
-  return messages.map((m) => ({
-    role: m.role === "model" ? "assistant" : "user",
-    content: m.parts.map((p) => p.text).join(""),
-  }));
+function toGroqMessages(messages) {
+    return messages.map((m) => ({
+        role: m.role === "model" ? "assistant" : "user",
+        content: m.parts.map((p) => p.text).join(""),
+    }));
 }
-
-export async function runMoodChat(messages: ChatMessage[]): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error("Missing GROQ_API_KEY");
-
-  const body = {
-    model: process.env.GROQ_MODEL || "llama-3.1-8b-instant",
-    temperature: 0.85,
-    max_tokens: 512,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...toGroqMessages(messages),
-    ],
-  };
-
-  const resp = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`Groq error ${resp.status}: ${text}`);
-  }
-
-  const json: any = await resp.json();
-  const text = String(json?.choices?.[0]?.message?.content || "").trim();
-
-  if (!text) throw new Error("Groq returned empty response");
-
-  return text;
+async function runMoodChat(messages) {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey)
+        throw new Error("Missing GROQ_API_KEY");
+    const body = {
+        model: process.env.GROQ_MODEL || "llama-3.1-8b-instant",
+        temperature: 0.85,
+        max_tokens: 512,
+        messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            ...toGroqMessages(messages),
+        ],
+    };
+    const resp = await fetch(GROQ_URL, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => "");
+        throw new Error(`Groq error ${resp.status}: ${text}`);
+    }
+    const json = await resp.json();
+    const text = String(json?.choices?.[0]?.message?.content || "").trim();
+    if (!text)
+        throw new Error("Groq returned empty response");
+    return text;
 }
+//# sourceMappingURL=moodChatService.js.map
