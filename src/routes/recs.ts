@@ -161,7 +161,7 @@ async function hardcoverGraphQL<T>(query: string, variables: Record<string, unkn
   const response = await fetch(HARDCOVER_GRAPHQL_URL, {
     method: "POST",
     headers: {
-      Authorization: apiKey,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query, variables }),
@@ -170,7 +170,12 @@ async function hardcoverGraphQL<T>(query: string, variables: Record<string, unkn
   const json: any = await response.json().catch(() => null);
 
   if (!response.ok || json?.errors?.length) {
-    console.error("Hardcover GraphQL error:", json?.errors || response.statusText);
+    console.error("Hardcover GraphQL error:", {
+      status: response.status,
+      statusText: response.statusText,
+      errors: json?.errors,
+      body: json,
+    });
     throw new Error("Failed to fetch Hardcover recommendations");
   }
 
