@@ -180,20 +180,37 @@ async function groqRecommendCandidates(searchText: string): Promise<AiBookCandid
     throw new Error("Missing GROQ_API_KEY environment variable");
   }
 
-  const prompt = `You are Lumey's book recommendation engine.
+  const prompt = `You are Lumey's similarity-first book recommendation engine.
 
 The user searched for: "${searchText}"
 
-Generate ${AI_CANDIDATE_COUNT} genuinely useful book recommendations that match the user's request.
+Generate ${AI_CANDIDATE_COUNT} real book recommendations that are as close as possible to what the user searched for.
 
-Rules:
-- Prefer books first published in ${MIN_RECOMMENDATION_YEAR} or later.
+Recommendation priority:
+1. If the search looks like a specific book title, treat it as "recommend books like this book."
+2. Prioritize close matches over variety.
+3. Match the original book's primary genre/subgenre first.
+4. Match tone, pacing, emotional intensity, romance level, darkness level, stakes, audience age category, tropes, themes, and character dynamics.
+5. Prefer books first published in ${MIN_RECOMMENDATION_YEAR} or later.
+6. Include older books only if they are an unusually strong similarity match.
+
+Avoid:
+- Do not give random books from the same broad genre.
+- Do not recommend classics unless the user specifically asks for classics.
+- Do not recommend the searched book itself.
 - Do not invent fake books.
-- Include a mix of popular and less obvious picks.
-- If the user typed a book title, recommend books with similar tone, genre, pacing, audience, and themes.
-- If the user typed a genre or vibe, recommend books that strongly fit that search.
-- Return JSON only.
-- Format: {"books":[{"title":"Book Title","author":"Author Name","reason":"Short reason"}]}`;
+- Do not recommend books only because they are popular.
+- Do not make every result from the same author unless the author is clearly the best match.
+- Do not drift into unrelated subgenres.
+
+Quality rules:
+- If the user typed a book title, every recommendation should feel like it belongs on a "read this next if you liked that" shelf.
+- If the user typed a genre, vibe, trope, or theme, recommend books that strongly match that exact request.
+- Include a short reason that explains the similarity in concrete terms, such as shared tropes, pacing, tone, relationship dynamic, magic system, themes, or emotional feel.
+- Use current, real books with verifiable title and author names.
+
+Return JSON only.
+Format: {"books":[{"title":"Book Title","author":"Author Name","reason":"Specific similarity reason"}]}`;
 
   console.log("Groq recommendation request:", { searchText, model: GROQ_MODEL });
 
