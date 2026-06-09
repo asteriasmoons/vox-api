@@ -3,6 +3,7 @@ import { Router } from "express";
 const router = Router();
 
 const BIG_BOOK_API_BASE_URL = "https://api.bigbookapi.com";
+const API_LEAGUE_API_BASE_URL = "https://api.apileague.com";
 const MIN_RECOMMENDATION_YEAR = 2020;
 const SEARCH_CANDIDATE_COUNT = 30;
 const FINAL_RECOMMENDATION_COUNT = 10;
@@ -35,6 +36,16 @@ type BigBookSearchResponse = {
   available?: number;
   number?: number;
   offset?: number;
+  books?: unknown[];
+};
+
+type BigBookSimilarResponse = {
+  similar_books?: unknown[];
+  books?: unknown[];
+};
+
+type ApiLeagueSimilarResponse = {
+  similar_books?: unknown[];
   books?: unknown[];
 };
 
@@ -200,6 +211,53 @@ async function bigBookFetch<T>(path: string, params: Record<string, string | num
   return json as T;
 }
 
+async function apiLeagueFetch<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
+  const apiKey = process.env.API_LEAGUE_API_KEY || "";
+
+  if (!apiKey) {
+    throw new Error("Missing API_LEAGUE_API_KEY environment variable");
+  }
+
+  const url = new URL(`${API_LEAGUE_API_BASE_URL}${path}`);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  console.log("API League request:", url.pathname, Object.fromEntries(url.searchParams.entries()));
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "x-api-key": apiKey,
+      Accept: "application/json",
+    },
+  });
+
+  const text = await response.text();
+  const json = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    console.error("API League API error:", {
+      status: response.status,
+      statusText: response.statusText,
+      body: json,
+    });
+
+    throw new Error(
+      JSON.stringify({
+        status: response.status,
+        statusText: response.statusText,
+        body: json,
+      })
+    );
+  }
+
+  return json as T;
+}
+
 async function fetchBookDetails(book: BigBookSearchBook): Promise<BigBookDetailBook | BigBookSearchBook> {
   const id = firstNumber(book.id);
   if (!id) return book;
@@ -210,6 +268,48 @@ async function fetchBookDetails(book: BigBookSearchBook): Promise<BigBookDetailB
     console.error("Big Book detail fetch failed:", error);
     return book;
   }
+}
+
+async function fetchSimilarBooks(book: BigBookSearchBook): Promise<BigBookSearchBook[]> {
+  const id = firstNumber(book.id);
+  if (!id) return [];
+
+  try {
+    const similarData = await bigBookFetch<BigBookSimilarResponse>(`/${id}/similar`);
+    const rawSimilarBooks = similarData.similar_books ?? similarData.books ?? [];
+    return flattenSearchBooks(rawSimilarBooks);
+  } catch (error) {
+    console.error("Big Book similar fetch failed:", error);
+    return [];
+  }
+}
+
+async function fetchApiLeagueSimilarBooks(book: BigBookSearchBook): Promise<BigBookSearchBook[]> {
+  const id = firstNumber(book.id);
+  if (!id) return [];
+
+  try {
+    const similarData = await apiLeagueFetch<ApiLeagueSimilarResponse>("/list-similar-books", {
+      id,
+    });
+
+    const rawSimilarBooks = similarData.similar_books ?? similarData.books ?? [];
+    return flattenSearchBooks(rawSimilarBooks);
+  } catch (error) {
+    console.error("API League similar-books fetch failed:", error);
+    return [];
+  }
+}
+
+function dedupeRecommendations(recs: LumeyBookRec[]): LumeyBookRec[] {
+  const seen = new Set<string>();
+
+  return recs.filter((rec) => {
+    const key = `${rec.title.toLowerCase()}|${rec.author.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -254,11 +354,57 @@ router.post("/", async (req, res) => {
       mappedRecs.map((rec) => ({ title: rec.title, releaseYear: rec.releaseYear ?? null }))
     );
 
-    const recs = mappedRecs
+    let recs = mappedRecs
       .filter((rec) => typeof rec.releaseYear === "number" && rec.releaseYear >= MIN_RECOMMENDATION_YEAR)
       .slice(0, FINAL_RECOMMENDATION_COUNT);
 
     console.log("Big Book recommendations after year filter:", recs.length);
+
+    if (recs.length < FINAL_RECOMMENDATION_COUNT && searchBooks.length > 0) {
+      console.log("Big Book recommendation count low. Trying similar-books fallback.");
+
+      const similarSeeds = searchBooks.slice(0, 3);
+      const similarBooksNested = await Promise.all(similarSeeds.map(fetchSimilarBooks));
+      const similarBooks = similarBooksNested.flat();
+
+      console.log("Big Book similar books returned:", similarBooks.length);
+
+      const similarDetails = await Promise.all(
+        similarBooks.slice(0, SEARCH_CANDIDATE_COUNT).map(fetchBookDetails)
+      );
+
+      const similarRecs = similarDetails
+        .map(toLumeyRec)
+        .filter((rec): rec is LumeyBookRec => Boolean(rec))
+        .filter((rec) => typeof rec.releaseYear === "number" && rec.releaseYear >= MIN_RECOMMENDATION_YEAR);
+
+      recs = dedupeRecommendations([...recs, ...similarRecs]).slice(0, FINAL_RECOMMENDATION_COUNT);
+
+      console.log("Big Book recommendations after similar fallback:", recs.length);
+    }
+
+    if (recs.length < FINAL_RECOMMENDATION_COUNT && searchBooks.length > 0) {
+      console.log("Recommendation count still low. Trying API League similar-books fallback.");
+
+      const apiLeagueSeeds = searchBooks.slice(0, 3);
+      const apiLeagueBooksNested = await Promise.all(apiLeagueSeeds.map(fetchApiLeagueSimilarBooks));
+      const apiLeagueBooks = apiLeagueBooksNested.flat();
+
+      console.log("API League similar books returned:", apiLeagueBooks.length);
+
+      const apiLeagueDetails = await Promise.all(
+        apiLeagueBooks.slice(0, SEARCH_CANDIDATE_COUNT).map(fetchBookDetails)
+      );
+
+      const apiLeagueRecs = apiLeagueDetails
+        .map(toLumeyRec)
+        .filter((rec): rec is LumeyBookRec => Boolean(rec))
+        .filter((rec) => typeof rec.releaseYear === "number" && rec.releaseYear >= MIN_RECOMMENDATION_YEAR);
+
+      recs = dedupeRecommendations([...recs, ...apiLeagueRecs]).slice(0, FINAL_RECOMMENDATION_COUNT);
+
+      console.log("Recommendations after API League fallback:", recs.length);
+    }
 
     return res.json({ recs });
   } catch (err) {
