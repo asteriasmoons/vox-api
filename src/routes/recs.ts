@@ -2,38 +2,48 @@ import { Router } from "express";
 
 const router = Router();
 
-const HARDCOVER_GRAPHQL_URL = "https://api.hardcover.app/v1/graphql";
+const BIG_BOOK_API_BASE_URL = "https://api.bigbookapi.com";
 
-type HardcoverBook = {
+type BigBookAuthor = {
+  id?: number;
+  name?: string | null;
+};
+
+type BigBookRating = {
+  average?: number | string | null;
+};
+
+type BigBookSearchBook = {
   id?: number;
   title?: string | null;
   subtitle?: string | null;
+  image?: string | null;
+  authors?: BigBookAuthor[] | null;
+  rating?: BigBookRating | null;
+};
+
+type BigBookDetailBook = BigBookSearchBook & {
   description?: string | null;
-  headline?: string | null;
-  slug?: string | null;
-  pages?: number | null;
-  release_year?: number | null;
-  rating?: number | string | null;
-  ratings_count?: number | null;
-  users_count?: number | null;
-  users_read_count?: number | null;
-  cached_contributors?: unknown;
-  cached_image?: unknown;
-  cached_tags?: unknown;
+  publish_date?: number | string | null;
+  number_of_pages?: number | string | null;
+};
+
+type BigBookSearchResponse = {
+  available?: number;
+  number?: number;
+  offset?: number;
+  books?: unknown[];
 };
 
 type LumeyBookRec = {
   title: string;
   author: string;
   summary: string;
-  hardcoverId?: number | undefined;
-  hardcoverUrl?: string | undefined;
+  bigBookId?: number | undefined;
   coverUrl?: string | undefined;
   pages?: number | undefined;
   releaseYear?: number | undefined;
   rating?: number | undefined;
-  ratingsCount?: number | undefined;
-  readersCount?: number | undefined;
   tags?: string[] | undefined;
 };
 
@@ -46,140 +56,157 @@ function firstNumber(value: unknown): number | undefined {
   return typeof num === "number" && Number.isFinite(num) ? num : undefined;
 }
 
-function getContributorName(contributor: unknown): string {
-  if (!contributor || typeof contributor !== "object") return "";
+function normalizeGenre(input: string): string | undefined {
+  const value = input.trim().toLowerCase();
 
-  const record = contributor as Record<string, unknown>;
-  const author = record.author;
+  const genreMap: Record<string, string> = {
+    action: "action",
+    adventure: "adventure",
+    biography: "biography",
+    classics: "classics",
+    contemporary: "contemporary",
+    crime: "crime",
+    dystopia: "dystopia",
+    fantasy: "fantasy",
+    fiction: "fiction",
+    folklore: "folklore",
+    graphic: "graphic_novel",
+    "graphic novel": "graphic_novel",
+    historical: "historical_fiction",
+    "historical fiction": "historical_fiction",
+    horror: "horror",
+    humor: "humor",
+    lgbtq: "lgbtq",
+    memoir: "memoir",
+    mystery: "mystery",
+    mythology: "mythology",
+    nonfiction: "nonfiction",
+    "non fiction": "nonfiction",
+    "non-fiction": "nonfiction",
+    occult: "occult",
+    paranormal: "paranormal",
+    poetry: "poetry",
+    romance: "romance",
+    scifi: "science_fiction",
+    "sci fi": "science_fiction",
+    "sci-fi": "science_fiction",
+    "science fiction": "science_fiction",
+    thriller: "thriller",
+    witchcraft: "witchcraft",
+    ya: "young_adult",
+    "young adult": "young_adult",
+  };
 
-  if (author && typeof author === "object") {
-    const authorName = cleanText((author as Record<string, unknown>).name);
-    if (authorName) return authorName;
-  }
-
-  return (
-    cleanText(record.name) ||
-    cleanText(record.author_name) ||
-    cleanText(record.contributor_name)
-  );
+  return genreMap[value];
 }
 
-function getAuthors(cachedContributors: unknown): string {
-  if (!Array.isArray(cachedContributors)) return "";
+function flattenSearchBooks(value: unknown): BigBookSearchBook[] {
+  if (!Array.isArray(value)) return [];
 
-  const names = cachedContributors
-    .map(getContributorName)
+  return value
+    .flatMap((item) => {
+      if (Array.isArray(item)) return item;
+      return [item];
+    })
+    .filter((item): item is BigBookSearchBook => {
+      return Boolean(item && typeof item === "object" && cleanText((item as BigBookSearchBook).title));
+    });
+}
+
+function authorsText(authors: BigBookAuthor[] | null | undefined): string {
+  if (!Array.isArray(authors)) return "";
+
+  return authors
+    .map((author) => cleanText(author?.name))
     .filter(Boolean)
-    .filter((name, index, arr) => arr.indexOf(name) === index);
-
-  return names.slice(0, 3).join(", ");
+    .filter((name, index, arr) => arr.indexOf(name) === index)
+    .slice(0, 3)
+    .join(", ");
 }
 
-function getCoverUrl(cachedImage: unknown): string | undefined {
-  if (!cachedImage || typeof cachedImage !== "object") return undefined;
-
-  const image = cachedImage as Record<string, unknown>;
-  return (
-    cleanText(image.url) ||
-    cleanText(image.image_url) ||
-    cleanText(image.medium) ||
-    cleanText(image.large) ||
-    undefined
-  );
-}
-
-function collectTagsFromValue(value: unknown, tags = new Set<string>()): Set<string> {
-  if (!value) return tags;
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed && trimmed.length <= 40) tags.add(trimmed);
-    return tags;
-  }
-
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectTagsFromValue(item, tags));
-    return tags;
-  }
-
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-
-    for (const key of ["tag", "name", "label", "category"]) {
-      collectTagsFromValue(record[key], tags);
-    }
-
-    for (const nestedKey of ["Genre", "Mood", "genres", "moods", "tags"]) {
-      collectTagsFromValue(record[nestedKey], tags);
-    }
-  }
-
-  return tags;
-}
-
-function getTags(cachedTags: unknown): string[] {
-  return Array.from(collectTagsFromValue(cachedTags)).slice(0, 12);
-}
-
-function toLumeyRec(book: HardcoverBook): LumeyBookRec | null {
+function toLumeyRec(book: BigBookDetailBook | BigBookSearchBook): LumeyBookRec | null {
   const title = cleanText(book.title);
   if (!title) return null;
 
-  const desc = cleanText(book.description) || cleanText(book.headline);
-  const summary = desc
-    ? desc.length > 1500
-      ? desc.slice(0, 1500).trim() + "…"
-      : desc
-    : "No description available.";
+  const subtitle = cleanText(book.subtitle);
+  const description = cleanText((book as BigBookDetailBook).description);
 
-  const slug = cleanText(book.slug);
-  const rating = firstNumber(book.rating);
+  const summary = description
+    ? description.length > 1500
+      ? description.slice(0, 1500).trim() + "…"
+      : description
+    : subtitle || "No description available.";
 
   return {
     title,
-    author: getAuthors(book.cached_contributors),
+    author: authorsText(book.authors),
     summary,
-    hardcoverId: book.id,
-    hardcoverUrl: slug ? `https://hardcover.app/books/${slug}` : undefined,
-    coverUrl: getCoverUrl(book.cached_image),
-    pages: firstNumber(book.pages),
-    releaseYear: firstNumber(book.release_year),
-    rating,
-    ratingsCount: firstNumber(book.ratings_count),
-    readersCount: firstNumber(book.users_read_count) ?? firstNumber(book.users_count),
-    tags: getTags(book.cached_tags),
+    bigBookId: firstNumber(book.id),
+    coverUrl: cleanText(book.image) || undefined,
+    pages: firstNumber((book as BigBookDetailBook).number_of_pages),
+    releaseYear: firstNumber((book as BigBookDetailBook).publish_date),
+    rating: firstNumber(book.rating?.average),
+    tags: [],
   };
 }
 
-async function hardcoverGraphQL<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const apiKey = process.env.HARDCOVER_API_KEY || "";
+async function bigBookFetch<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
+  const apiKey = process.env.BIG_BOOK_API_KEY || process.env.API_LEAGUE_API_KEY || "";
 
   if (!apiKey) {
-    throw new Error("Missing HARDCOVER_API_KEY environment variable");
+    throw new Error("Missing BIG_BOOK_API_KEY environment variable");
   }
 
-  const response = await fetch(HARDCOVER_GRAPHQL_URL, {
-    method: "POST",
+  const url = new URL(`${BIG_BOOK_API_BASE_URL}${path}`);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  console.log("Big Book request:", url.pathname, Object.fromEntries(url.searchParams.entries()));
+
+  const response = await fetch(url, {
+    method: "GET",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      Accept: "application/json",
     },
-    body: JSON.stringify({ query, variables }),
   });
 
-  const json: any = await response.json().catch(() => null);
+  const text = await response.text();
+  const json = text ? JSON.parse(text) : null;
 
-  if (!response.ok || json?.errors?.length) {
-    console.error("Hardcover GraphQL error:", {
+  if (!response.ok) {
+    console.error("Big Book API error:", {
       status: response.status,
       statusText: response.statusText,
-      errors: json?.errors,
       body: json,
     });
-    throw new Error("Failed to fetch Hardcover recommendations");
+
+    throw new Error(
+      JSON.stringify({
+        status: response.status,
+        statusText: response.statusText,
+        body: json,
+      })
+    );
   }
 
-  return json?.data as T;
+  return json as T;
+}
+
+async function fetchBookDetails(book: BigBookSearchBook): Promise<BigBookDetailBook | BigBookSearchBook> {
+  const id = firstNumber(book.id);
+  if (!id) return book;
+
+  try {
+    return await bigBookFetch<BigBookDetailBook>(`/${id}`);
+  } catch (error) {
+    console.error("Big Book detail fetch failed:", error);
+    return book;
+  }
 }
 
 /**
@@ -195,59 +222,25 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Genre is required" });
     }
 
-    const genre = genreRaw.slice(0, 60);
-    const genrePattern = `%${genre}%`;
+    const genre = genreRaw.slice(0, 80);
+    const normalizedGenre = normalizeGenre(genre);
+    const query = normalizedGenre ? `popular ${genre} books` : genre;
 
-    const query = `
-      query LumeyBookRecommendations($genrePattern: String!, $limit: Int!) {
-        books(
-          where: {
-            _and: [
-              { title: { _is_null: false } }
-              { is_partial_book: { _eq: false } }
-              {
-                _or: [
-                  { cached_tags: { _cast: { String: { _ilike: $genrePattern } } } }
-                  { title: { _ilike: $genrePattern } }
-                  { subtitle: { _ilike: $genrePattern } }
-                  { description: { _ilike: $genrePattern } }
-                  { headline: { _ilike: $genrePattern } }
-                ]
-              }
-            ]
-          }
-          order_by: [
-            { users_read_count: desc_nulls_last }
-            { rating: desc_nulls_last }
-            { ratings_count: desc_nulls_last }
-          ]
-          limit: $limit
-        ) {
-          id
-          title
-          subtitle
-          description
-          headline
-          slug
-          pages
-          release_year
-          rating
-          ratings_count
-          users_count
-          users_read_count
-          cached_contributors
-          cached_image
-          cached_tags
-        }
-      }
-    `;
-
-    const data = await hardcoverGraphQL<{ books?: HardcoverBook[] }>(query, {
-      genrePattern,
-      limit: 20,
+    const searchData = await bigBookFetch<BigBookSearchResponse>("/search-books", {
+      query,
+      genres: normalizedGenre,
+      number: 10,
+      offset: 0,
     });
 
-    const recs = (Array.isArray(data?.books) ? data.books : [])
+    const searchBooks = flattenSearchBooks(searchData.books);
+
+    console.log("Big Book available:", searchData.available ?? 0);
+    console.log("Big Book usable search books:", searchBooks.length);
+
+    const detailedBooks = await Promise.all(searchBooks.slice(0, 10).map(fetchBookDetails));
+
+    const recs = detailedBooks
       .map(toLumeyRec)
       .filter((rec): rec is LumeyBookRec => Boolean(rec))
       .slice(0, 10);
@@ -255,7 +248,13 @@ router.post("/", async (req, res) => {
     return res.json({ recs });
   } catch (err) {
     console.error("Recommendations route error:", err);
-    return res.status(500).json({ error: "Failed to fetch recommendations" });
+
+    const message = err instanceof Error ? err.message : String(err);
+
+    return res.status(500).json({
+      error: "Failed to fetch recommendations",
+      detail: message,
+    });
   }
 });
 
