@@ -18,6 +18,7 @@ import wellnessWallRoutes from "./routes/wellness-wall";
 import spiritualRoutes from "./routes/spiritual";
 import moodRoutes from "./routes/mood";
 import checklistRoutes from "./routes/checklist";
+import bookSearchRouter from "./routes/bookSearch";
 
 import path from "path";
 dotenv.config();
@@ -52,6 +53,7 @@ app.use("/api", wellnessWallRoutes);
 app.use("/api/spiritual", spiritualRoutes);
 app.use("/api/mood", moodRoutes);
 app.use("/api/checklist", checklistRoutes);
+app.use("/api/books/search", bookSearchRouter);
 
 io.on("connection", (socket) => {
   socket.on("buddy:join_room", (groupId: string) => {
