@@ -181,39 +181,46 @@ async function groqRecommendCandidates(searchText: string): Promise<AiBookCandid
     throw new Error("Missing GROQ_API_KEY environment variable");
   }
 
-  const prompt = `You are Lumey's similarity-first book recommendation engine.
+  const prompt = `You are Lumey's strict book similarity engine.
 
 The user searched for: "${searchText}"
 
-Generate ${AI_CANDIDATE_COUNT} real book recommendations that are as close as possible to what the user searched for.
+Your job has TWO separate steps:
+1. First, identify what the searched book/request actually is: primary genre, subgenre, audience age category, tone, pacing, romance level, darkness level, tropes, themes, and relationship dynamics.
+2. Then recommend ${AI_CANDIDATE_COUNT} real books that match those qualities as closely as possible.
 
-Recommendation priority:
-1. If the search looks like a specific book title, treat it as "recommend books like this book."
-2. Prioritize close matches over variety.
-3. Match the original book's primary genre/subgenre first.
-4. Match tone, pacing, emotional intensity, romance level, darkness level, stakes, audience age category, tropes, themes, and character dynamics.
-5. Prefer books first published in ${MIN_RECOMMENDATION_YEAR} or later.
-6. Include older books only if they are an unusually strong similarity match.
-
-Avoid:
-- Do not give random books from the same broad genre.
-- Do not recommend classics unless the user specifically asks for classics.
+Hard rules:
+- If the search is a specific book title, recommend books LIKE that exact book, not just popular books near it.
+- Stay in the same primary genre unless the user explicitly asks for cross-genre recommendations.
+- Stay in the same audience category when possible, such as YA, New Adult, Adult, middle grade, nonfiction, etc.
+- Prioritize exact subgenre matches over broad genre matches.
+- Prioritize close tone, pacing, stakes, romance level, darkness level, and trope matches over variety.
+- Prefer books published from the current year backward to ${MIN_RECOMMENDATION_YEAR}, with newer books ranked higher when similarity is equally strong.
 - Do not recommend the searched book itself.
+- Do not recommend duplicate titles.
+- Do not recommend books from unrelated genres.
+- Do not recommend books only because they are popular on BookTok, Goodreads, or bestseller lists.
 - Do not invent fake books.
-- Do not recommend books only because they are popular.
-- Do not make every result from the same author unless the author is clearly the best match.
-- Do not drift into unrelated subgenres.
 
-Quality rules:
-- If the user typed a book title, every recommendation should feel like it belongs on a "read this next if you liked that" shelf.
-- If the user typed a genre, vibe, trope, or theme, recommend books that strongly match that exact request.
-- Include a proper book summary for each recommended book, not a similarity explanation.
-- The summary should describe the recommended book itself in 2-3 clear sentences.
-- Do not say phrases like "same kind of book," "similar to the searched book," "if you liked that," or "this is a good match because."
-- Use current, real books with verifiable title and author names.
+Date validation:
+- Before returning a recommendation, verify that the book was first published in ${MIN_RECOMMENDATION_YEAR} or later.
+- Remove any recommendation that does not satisfy this requirement.
+
+Bad recommendation examples:
+- If the user searches a romantasy, do not return general epic fantasy with no romance.
+- If the user searches cozy fantasy, do not return dark grimdark fantasy.
+- If the user searches adult thriller, do not return YA fantasy.
+- If the user searches a witchy mystery, do not return random paranormal romance unless the mystery structure is also present.
+
+Summary rules:
+- Each recommendation must include a proper book summary of the recommended book itself.
+- The summary should be 4-6 clear sentences.
+- The summary must describe the actual premise of that book.
+- Do not use the summary to explain why it is similar.
+- Do not say phrases like "same kind of book," "similar to the searched book," "if you liked that," "fans of," or "this is a good match because."
 
 Return JSON only.
-Format: {"books":[{"title":"Book Title","author":"Author Name","summary":"Proper 2-3 sentence summary of this recommended book"}]}`;
+Format: {"books":[{"title":"Book Title","author":"Author Name","summary":"Proper 4-6 sentence summary of this recommended book"}]}`;
 
   console.log("Groq recommendation request:", { searchText, model: GROQ_MODEL });
 
