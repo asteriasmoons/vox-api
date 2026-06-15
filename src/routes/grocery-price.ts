@@ -54,15 +54,11 @@ router.post("/", async (req, res) => {
         messages: [
           {
             role: "user",
-            content: `Search ${storeName} for "${ingredient}". Return ONLY a JSON array of products with prices, no other text: [{"price": 3.49, "name": "Product Name"}]. Max 5 results. If none found return [].`,
+            content: `Search ${domain} for "${ingredient}". Return ONLY a JSON array of products with prices, no other text: [{"price": 3.49, "name": "Product Name"}]. Max 5 results. If none found return [].`,
           },
         ],
         temperature: 0.1,
         max_tokens: 300,
-        search_settings: {
-          include_domains: [domain],
-          country: "united states",
-        },
       }),
     });
 
