@@ -7,8 +7,12 @@ const router = Router();
 router.post("/analyze", async (req, res) => {
   try {
     const challengeName = String(req.body?.challengeName || "").trim();
+    const identityStatement = String(req.body?.identityStatement || "").trim();
     const progress = String(req.body?.progress || "").trim();
     const daysRemaining = Number(req.body?.daysRemaining ?? 0);
+    const systemSteps: string[] = Array.isArray(req.body?.systemSteps)
+      ? req.body.systemSteps.map((s: any) => String(s || "").trim()).filter(Boolean)
+      : [];
     const answers: { question: string; answer: string }[] =
       req.body?.answers ?? [];
 
@@ -30,8 +34,10 @@ router.post("/analyze", async (req, res) => {
 
     const result = await generateChallengeAnalysis({
       challengeName,
+      identityStatement,
       progress,
       daysRemaining,
+      systemSteps,
       answers,
     });
 
