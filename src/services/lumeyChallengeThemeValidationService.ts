@@ -1,39 +1,36 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = process.env.GROQ_CHALLENGE_MODEL || "llama-3.1-8b-instant";
+const MODEL =
+  process.env.GROQ_CHALLENGE_MODEL ||
+  process.env.GROQ_MODEL ||
+  "llama-3.1-8b-instant";
 
-export type LumeyChallengeValidationStatus =
+export type ChallengeAIValidationStatus =
   | "approved"
   | "needsMoreInfo"
   | "rejected";
 
-export interface LumeyThemeValidationBook {
-  title: string;
-  author?: string;
-  summary?: string;
-  genres?: string[];
-  moods?: string[];
-  tags?: string[];
-  tropes?: string[];
-  topics?: string[];
-}
-
-export interface LumeyThemeValidationInput {
+export interface ChallengeAIValidationPacket {
   challengeTitle: string;
   requirementText: string;
   requiredThemes: string[];
-  books: LumeyThemeValidationBook[];
-  submissionNote?: string;
-  reviewText?: string;
+  bookTitles: string[];
+  bookSummaries: string[];
+  bookGenres: string[][];
+  bookMoods: string[][];
+  bookTags: string[][];
+  bookTropes: string[][];
+  submissionNote: string;
+  linkedReviewText?: string | null;
 }
 
-export interface LumeyThemeValidationResult {
-  result: LumeyChallengeValidationStatus;
+export interface ChallengeAIValidationResponse {
+  status: ChallengeAIValidationStatus;
   message: string;
 }
 
 export async function validateLumeyChallengeTheme(
-  input: LumeyThemeValidationInput,
-): Promise<LumeyThemeValidationResult> {
+  input: ChallengeAIValidationPacket,
+): Promise<ChallengeAIValidationResponse> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("Missing GROQ_API_KEY");
 
@@ -42,36 +39,29 @@ export async function validateLumeyChallengeTheme(
   const body = {
     model: MODEL,
     temperature: 0.2,
-    max_tokens: 350,
+    max_tokens: 450,
     response_format: { type: "json_object" },
     messages: [
       {
         role: "system",
-        content: `You are Lumey's challenge validation assistant.
+        content: `You are Lumey's reading challenge validation assistant.
 
-Your job is to decide whether a user's linked books, metadata, review text, and submission note satisfy a reading challenge's fuzzy or theme-based requirement.
-
-You ONLY validate vibe/theme/interpretation-based reading challenges.
-
-Valid response statuses:
-- approved
-- needsMoreInfo
-- rejected
+Your job is to decide whether a user's linked books, metadata, review text, and submission note satisfy a fuzzy or theme-based Lumey reading challenge.
 
 Return a JSON object with exactly these keys:
-- "result": "approved" | "needsMoreInfo" | "rejected"
+- "status": "approved" | "needsMoreInfo" | "rejected"
 - "message": A short friendly explanation.
 
 Rules:
 - Be fair, not overly strict.
-- If the books clearly match the theme, approve.
-- If the user gave too little context but the submission might qualify, return needsMoreInfo.
-- If the books clearly do not match the theme, reject.
-- Do not approve if the submitted information is empty or unrelated.
+- If the submitted books clearly match the challenge theme, approve.
+- If the submission might qualify but lacks enough explanation or metadata, return needsMoreInfo.
+- If the submitted books clearly do not match the challenge, reject.
+- Do not approve empty, unrelated, or unsupported submissions.
 - Do not mention being an AI.
 - Keep the message kind, clear, and user-facing.
-- The message should be 1-2 sentences.
-- Do not include markdown, code fences, extra keys, or explanations outside the JSON object.`,
+- Keep the message to 1-2 sentences.
+- Return valid JSON only. No markdown. No code fences. No extra keys.`,
       },
       {
         role: "user",
@@ -120,12 +110,12 @@ Rules:
 
   try {
     parsed = JSON.parse(raw);
-  } catch (e) {
-    console.error("[lumey-challenge-theme] JSON parse error:", e);
+  } catch (error) {
+    console.error("[lumey-challenge-theme] JSON parse error:", error);
     throw new Error(`Failed to parse Groq JSON response: ${raw}`);
   }
 
-  const result = normalizeResult(parsed.result);
+  const status = normalizeStatus(parsed.status);
   const message = String(parsed.message || "").trim();
 
   if (!message) {
@@ -133,42 +123,31 @@ Rules:
   }
 
   return {
-    result,
-    message: message.slice(0, 280),
+    status,
+    message: message.slice(0, 300),
   };
 }
 
 function sanitizeInput(
-  input: LumeyThemeValidationInput,
-): LumeyThemeValidationInput {
+  input: ChallengeAIValidationPacket,
+): ChallengeAIValidationPacket {
   return {
     challengeTitle: cleanString(input.challengeTitle, 160),
     requirementText: cleanString(input.requirementText, 300),
     requiredThemes: cleanStringArray(input.requiredThemes, 30, 80),
-    books: Array.isArray(input.books)
-      ? input.books.map(cleanBook).filter((book) => book.title.length > 0)
-      : [],
-    submissionNote: cleanString(input.submissionNote ?? "", 1200),
-    reviewText: cleanString(input.reviewText ?? "", 2000),
-  };
-}
-
-function cleanBook(book: LumeyThemeValidationBook): LumeyThemeValidationBook {
-  return {
-    title: cleanString(book.title, 180),
-    author: cleanString(book.author ?? "", 120),
-    summary: cleanString(book.summary ?? "", 1200),
-    genres: cleanStringArray(book.genres, 20, 60),
-    moods: cleanStringArray(book.moods, 20, 60),
-    tags: cleanStringArray(book.tags, 30, 60),
-    tropes: cleanStringArray(book.tropes, 30, 60),
-    topics: cleanStringArray(book.topics, 30, 60),
+    bookTitles: cleanStringArray(input.bookTitles, 20, 180),
+    bookSummaries: cleanStringArray(input.bookSummaries, 20, 500),
+    bookGenres: cleanNestedStringArray(input.bookGenres, 20, 20, 60),
+    bookMoods: cleanNestedStringArray(input.bookMoods, 20, 20, 60),
+    bookTags: cleanNestedStringArray(input.bookTags, 20, 30, 60),
+    bookTropes: cleanNestedStringArray(input.bookTropes, 20, 30, 60),
+    submissionNote: cleanString(input.submissionNote, 1200),
+    linkedReviewText: cleanString(input.linkedReviewText ?? "", 2000),
   };
 }
 
 function cleanString(value: unknown, maxLength: number): string {
   if (typeof value !== "string") return "";
-
   return value.trim().slice(0, maxLength);
 }
 
@@ -186,7 +165,20 @@ function cleanStringArray(
     .slice(0, maxItems);
 }
 
-function normalizeResult(value: unknown): LumeyChallengeValidationStatus {
+function cleanNestedStringArray(
+  value: unknown,
+  maxOuterItems: number,
+  maxInnerItems: number,
+  maxItemLength: number,
+): string[][] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((inner) => cleanStringArray(inner, maxInnerItems, maxItemLength))
+    .slice(0, maxOuterItems);
+}
+
+function normalizeStatus(value: unknown): ChallengeAIValidationStatus {
   if (value === "approved") return "approved";
   if (value === "rejected") return "rejected";
   return "needsMoreInfo";
