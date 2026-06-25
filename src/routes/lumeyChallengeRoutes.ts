@@ -110,7 +110,7 @@ router.post(
         message: validationResult.message,
       });
     } catch (error) {
-      console.error("Challenge theme validation failed:", error);
+      console.error("[lumey-challenges] Theme validation failed:", error);
 
       return res.status(500).json({
         result: "needsMoreInfo",
