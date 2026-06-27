@@ -2,10 +2,11 @@ import mongoose from "mongoose";
 
 const lumeyChallengeCommentSchema = new mongoose.Schema(
   {
-    submissionID: {
+    feedItemID: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "LumeyChallengeSubmission",
+      ref: "LumeyChallengeFeedItem",
       required: true,
+      index: true,
     },
 
     userID: {
@@ -16,6 +17,18 @@ const lumeyChallengeCommentSchema = new mongoose.Schema(
     username: {
       type: String,
       required: true,
+    },
+
+    avatarName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    avatarURL: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     text: {
@@ -33,6 +46,8 @@ const lumeyChallengeCommentSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+lumeyChallengeCommentSchema.index({ feedItemID: 1, createdDate: 1 });
 
 export const LumeyChallengeComment = mongoose.model(
   "LumeyChallengeComment",

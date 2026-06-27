@@ -1,9 +1,12 @@
 import { Router, Request, Response } from "express";
 import {
   createSubmission,
+  createFeedPost,
+  uploadFeedPhoto,
+  approveSubmissionAndPostToFeed,
   getChallengeFeed,
-  toggleLike,
-  addComment,
+  toggleFeedItemLike,
+  addFeedItemComment,
   deleteComment,
   getUserProfile,
   updateUserProfile,
@@ -46,10 +49,11 @@ router.post("/submissions", async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/lumey/challenges/submissions/:submissionID/like
+ * POST /api/lumey/challenges/submissions/:submissionID/approve
+ * Approves a challenge submission and automatically posts it to the feed.
  */
 router.post(
-  "/submissions/:submissionID/like",
+  "/submissions/:submissionID/approve",
   async (req: Request, res: Response) => {
     try {
       const submissionID = String(req.params.submissionID || "").trim();
@@ -60,14 +64,84 @@ router.post(
         });
       }
 
-      const result = await toggleLike({
+      const result = await approveSubmissionAndPostToFeed({
         submissionID,
+        validationMessage: req.body.validationMessage,
+        challengeTitle: req.body.challengeTitle,
+      });
+
+      return res.status(200).json(result);
+    } catch (error: any) {
+      console.error("[lumey-challenges] approve submission:", error);
+
+      return res.status(400).json({
+        message: error?.message ?? "Unable to approve submission.",
+      });
+    }
+  },
+);
+
+/**
+ * POST /api/lumey/challenges/feed/posts
+ * Creates a normal user post and adds it to the feed.
+ */
+router.post("/feed/posts", async (req: Request, res: Response) => {
+  try {
+    const feedItem = await createFeedPost(req.body);
+
+    return res.status(201).json(feedItem);
+  } catch (error: any) {
+    console.error("[lumey-challenges] create feed post:", error);
+
+    return res.status(400).json({
+      message: error?.message ?? "Unable to create feed post.",
+    });
+  }
+});
+
+/**
+ * POST /api/lumey/challenges/feed/upload-photo
+ * Uploads a feed photo and returns the stored image string.
+ */
+router.post("/feed/upload-photo", async (req: Request, res: Response) => {
+  try {
+    const result = await uploadFeedPhoto({
+      imageBase64: req.body.imageBase64,
+    });
+
+    return res.status(201).json(result);
+  } catch (error: any) {
+    console.error("[lumey-challenges] upload feed photo:", error);
+
+    return res.status(400).json({
+      message: error?.message ?? "Unable to upload feed photo.",
+    });
+  }
+});
+
+/**
+ * POST /api/lumey/challenges/feed/items/:feedItemID/like
+ */
+router.post(
+  "/feed/items/:feedItemID/like",
+  async (req: Request, res: Response) => {
+    try {
+      const feedItemID = String(req.params.feedItemID || "").trim();
+
+      if (!feedItemID) {
+        return res.status(400).json({
+          message: "feedItemID is required.",
+        });
+      }
+
+      const result = await toggleFeedItemLike({
+        feedItemID,
         userID: req.body.userID,
       });
 
       return res.status(200).json(result);
     } catch (error: any) {
-      console.error("[lumey-challenges] like:", error);
+      console.error("[lumey-challenges] like feed item:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to update like.",
@@ -77,30 +151,32 @@ router.post(
 );
 
 /**
- * POST /api/lumey/challenges/submissions/:submissionID/comments
+ * POST /api/lumey/challenges/feed/items/:feedItemID/comments
  */
 router.post(
-  "/submissions/:submissionID/comments",
+  "/feed/items/:feedItemID/comments",
   async (req: Request, res: Response) => {
     try {
-      const submissionID = String(req.params.submissionID || "").trim();
+      const feedItemID = String(req.params.feedItemID || "").trim();
 
-      if (!submissionID) {
+      if (!feedItemID) {
         return res.status(400).json({
-          message: "submissionID is required.",
+          message: "feedItemID is required.",
         });
       }
 
-      const comment = await addComment({
-        submissionID,
+      const comment = await addFeedItemComment({
+        feedItemID,
         userID: req.body.userID,
         username: req.body.username,
+        avatarName: req.body.avatarName,
+        avatarURL: req.body.avatarURL,
         text: req.body.text,
       });
 
       return res.status(201).json(comment);
     } catch (error: any) {
-      console.error("[lumey-challenges] add comment:", error);
+      console.error("[lumey-challenges] add feed item comment:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to add comment.",

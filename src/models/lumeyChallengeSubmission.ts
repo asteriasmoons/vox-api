@@ -33,6 +33,18 @@ const lumeyChallengeSubmissionSchema = new mongoose.Schema(
 
     approvedDate: Date,
 
+    postedToFeed: {
+      type: Boolean,
+      default: false,
+    },
+
+    feedItemID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LumeyChallengeFeedItem",
+      default: null,
+      index: true,
+    },
+
     likeCount: {
       type: Number,
       default: 0,

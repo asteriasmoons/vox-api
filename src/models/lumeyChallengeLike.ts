@@ -2,10 +2,11 @@ import mongoose from "mongoose";
 
 const lumeyChallengeLikeSchema = new mongoose.Schema(
   {
-    submissionID: {
+    feedItemID: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "LumeyChallengeSubmission",
+      ref: "LumeyChallengeFeedItem",
       required: true,
+      index: true,
     },
 
     userID: {
@@ -25,7 +26,7 @@ const lumeyChallengeLikeSchema = new mongoose.Schema(
 
 lumeyChallengeLikeSchema.index(
   {
-    submissionID: 1,
+    feedItemID: 1,
     userID: 1,
   },
   {
