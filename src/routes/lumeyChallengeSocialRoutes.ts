@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import multer from "multer";
 import {
   createSubmission,
   createFeedPost,
@@ -13,6 +14,7 @@ import {
 } from "../services/lumeyChallengeSocialService";
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 /**
  * GET /api/lumey/challenges/feed
@@ -101,13 +103,15 @@ router.post("/feed/posts", async (req: Request, res: Response) => {
 
 /**
  * POST /api/lumey/challenges/feed/upload-photo
- * Uploads a feed photo and returns the stored image string.
+ * Uploads a feed photo to Cloudinary and returns the CDN URL.
  */
-router.post("/feed/upload-photo", async (req: Request, res: Response) => {
+router.post("/feed/upload-photo", upload.single("photo"), async (req: Request, res: Response) => {
   try {
-    const result = await uploadFeedPhoto({
-      imageBase64: req.body.imageBase64,
-    });
+    if (!req.file) {
+      return res.status(400).json({ message: "No photo file provided." });
+    }
+
+    const result = await uploadFeedPhoto(req.file.buffer);
 
     return res.status(201).json(result);
   } catch (error: any) {

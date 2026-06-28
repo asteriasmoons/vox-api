@@ -4,6 +4,7 @@ import { LumeyChallengeLike } from "../models/lumeyChallengeLike";
 import { LumeyChallengeProfile } from "../models/lumeyChallengeProfile";
 import { LumeyChallengeFeedItem } from "../models/lumeyChallengeFeedItem";
 import { LumeyChallengePost } from "../models/lumeyChallengePost";
+import cloudinary from "../utils/cloudinary";
 
 export async function getChallengeFeed() {
   const feedItems = await LumeyChallengeFeedItem.find()
@@ -140,19 +141,32 @@ export async function approveSubmissionAndPostToFeed(input: {
   };
 }
 
-export async function uploadFeedPhoto(input: { imageBase64: string }) {
-  const imageBase64 = cleanString(input.imageBase64);
-
-  if (!imageBase64) {
-    throw new Error("imageBase64 is required.");
+export async function uploadFeedPhoto(fileBuffer: Buffer): Promise<{ photoURL: string }> {
+  if (!fileBuffer || fileBuffer.length === 0) {
+    throw new Error("Image file is required.");
   }
 
-  if (!isLikelyImageBase64(imageBase64)) {
-    throw new Error("Invalid image data.");
-  }
+  const result = await new Promise<any>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "lumey-feed",
+        resource_type: "image",
+        transformation: [
+          { width: 1200, crop: "limit" },
+          { quality: "auto", fetch_format: "auto" },
+        ],
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      },
+    );
+
+    stream.end(fileBuffer);
+  });
 
   return {
-    photoBase64: imageBase64,
+    photoURL: result.secure_url,
   };
 }
 
@@ -161,9 +175,8 @@ export async function createFeedPost(input: any) {
 
   const text = cleanString(input.text);
   const photoURL = cleanString(input.photoURL);
-  const photoBase64 = cleanString(input.photoBase64);
 
-  if (!text && !photoURL && !photoBase64) {
+  if (!text && !photoURL) {
     throw new Error("A feed post needs text, a photo, or both.");
   }
 
@@ -174,7 +187,7 @@ export async function createFeedPost(input: any) {
     username,
     text,
     photoURL,
-    photoBase64,
+    photoBase64: "",
     photoCaption: cleanString(input.photoCaption),
     linkedBookID: cleanString(input.linkedBookID),
     linkedChallengeID: cleanString(input.linkedChallengeID),
@@ -197,7 +210,7 @@ export async function createFeedPost(input: any) {
     challengeTitle: "",
     text: post.text,
     photoURL: post.photoURL,
-    photoBase64: post.photoBase64,
+    photoBase64: "",
     likeCount: 0,
     commentCount: 0,
     createdDate: post.createdDate,
@@ -404,14 +417,4 @@ function cleanStringArray(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function isLikelyImageBase64(value: string): boolean {
-  if (!value) return false;
-
-  if (value.startsWith("data:image/")) {
-    return value.includes(";base64,");
-  }
-
-  return /^[A-Za-z0-9+/=]+$/.test(value);
 }
