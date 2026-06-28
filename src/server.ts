@@ -42,7 +42,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (_req, res) => {
-  res.json({ status: "Lystaria Books API running" });
+  res.json({ status: "Lystaria Apps API running" });
 });
 
 app.use("/api/books/summary", summaryRoute);
@@ -90,7 +90,7 @@ mongoose
     console.log("MongoDB Atlas connected");
     await restoreActiveSprintTimers(io);
     httpServer.listen(PORT, () => {
-      console.log(`📚 Lystaria Books API running on port ${PORT}`);
+      console.log(`Lystaria Apps API running on port ${PORT}`);
     });
   })
   .catch((err) => {
