@@ -493,21 +493,25 @@ async function ensureProfile(input: { userID: string; username: string }) {
 export async function createAnnouncement(input: {
   title: string;
   body: string;
-  authorUserID: string;
-  authorUsername: string;
+  userID: string;
+  username?: string;
+  avatarName?: string;
+  avatarURL?: string;
 }) {
   const title = cleanString(input.title);
   const body = cleanString(input.body);
 
   if (!title) throw new Error("Announcement title is required.");
   if (!body) throw new Error("Announcement body is required.");
-  if (!input.authorUserID) throw new Error("authorUserID is required.");
+  if (!input.userID) throw new Error("authorUserID is required.");
 
   const announcement = await LumeyFeedAnnouncement.create({
     title,
     body,
-    authorUserID: input.authorUserID,
-    authorUsername: cleanString(input.authorUsername) || "Lumey",
+    userID: input.userID,
+    username: cleanString(input.username) || "Lumey",
+    avatarURL: cleanString(input.avatarURL) || "",
+    avatarName: cleanString(input.avatarName) || "",
     isActive: true,
     createdDate: new Date(),
   });

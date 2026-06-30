@@ -16,15 +16,27 @@ const lumeyFeedAnnouncementSchema = new mongoose.Schema(
       maxlength: 2000,
     },
 
-    authorUserID: {
+    userID: {
       type: String,
       required: true,
       index: true,
     },
 
-    authorUsername: {
+    username: {
       type: String,
       required: true,
+      trim: true,
+    },
+
+    avatarURL: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    avatarName: {
+      type: String,
+      default: "",
       trim: true,
     },
 
