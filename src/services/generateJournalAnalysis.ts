@@ -1,5 +1,5 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "openai/gpt-oss-120b";
+const MODEL = "llama-3.3-70b-versatile";
 
 export interface JournalAnalysisResult {
   themes: string[];
@@ -24,7 +24,7 @@ export async function generateJournalAnalysis(
 
   const body = {
     model: MODEL,
-    temperature: 0.3,
+    temperature: 0.25,
     max_tokens: 5000,
     response_format: { type: "json_object" },
     messages: [
@@ -143,7 +143,7 @@ reflection
       {
         role: "user",
         content: `Here is my journal entry. Read it fully from beginning to end before responding. Reflect the full shape of the entry, including the major topics, emotional shifts, quieter details, and closing thoughts. Include enough specific context that the reflection feels genuinely connected to what I actually wrote, but do not turn it into a recap.
-        
+
 ${entryText}`,
       },
     ],
