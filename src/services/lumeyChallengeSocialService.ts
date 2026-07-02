@@ -602,6 +602,30 @@ export async function updateAnnouncementActive(
   return announcement;
 }
 
+export async function deleteAnnouncement(announcementID: string) {
+  const cleanedAnnouncementID = cleanString(announcementID);
+
+  if (!cleanedAnnouncementID) {
+    throw new Error("announcementID is required.");
+  }
+
+  const announcement = await LumeyFeedAnnouncement.findById(
+    cleanedAnnouncementID,
+  );
+
+  if (!announcement) {
+    throw new Error("Announcement not found.");
+  }
+
+  await LumeyFeedAnnouncement.deleteOne({
+    _id: announcement._id,
+  });
+
+  return {
+    deleted: true,
+  };
+}
+
 function cleanString(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.trim();

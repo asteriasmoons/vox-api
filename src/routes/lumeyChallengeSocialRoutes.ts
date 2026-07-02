@@ -17,6 +17,7 @@ import {
   createAnnouncement,
   getActiveAnnouncements,
   updateAnnouncementActive,
+  deleteAnnouncement,
 } from "../services/lumeyChallengeSocialService";
 
 const router = Router();
@@ -409,6 +410,34 @@ router.put(
 
       return res.status(400).json({
         message: error?.message ?? "Unable to update announcement.",
+      });
+    }
+  },
+);
+
+/**
+ * DELETE /api/lumey/challenges/feed/announcements/:announcementID
+ */
+router.delete(
+  "/feed/announcements/:announcementID",
+  async (req: Request, res: Response) => {
+    try {
+      const announcementID = String(req.params.announcementID || "").trim();
+
+      if (!announcementID) {
+        return res.status(400).json({
+          message: "announcementID is required.",
+        });
+      }
+
+      await deleteAnnouncement(announcementID);
+
+      return res.sendStatus(204);
+    } catch (error: any) {
+      console.error("[lumey-challenges] delete announcement:", error);
+
+      return res.status(400).json({
+        message: error?.message ?? "Unable to delete announcement.",
       });
     }
   },
