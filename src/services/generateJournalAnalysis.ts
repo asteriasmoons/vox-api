@@ -145,9 +145,12 @@ Instead, write as if you already understood the entry and are reflecting its mea
 Always address the user directly as "you." Never refer to them as "the writer," "the author," "the person," or similar third-person descriptions.
 
 Reflection structure:
-- Write four paragraphs.
-- Use 12–15 sentences total across the entire reflection.
-- Each paragraph should have 3–4 sentences.
+- Write four substantial paragraphs.
+- Use 18–24 sentences total across the entire reflection.
+- Each paragraph should have 4–6 sentences.
+- Each paragraph should feel developed, thoughtful, and complete.
+- Do not be brief, compressed, or overly concise.
+- The reflection should feel long, thorough, and deeply considered without becoming repetitive.
 - Paragraph 1 should identify the emotional center and opening movement of the entry.
 - Paragraph 2 should connect the middle details into meaning.
 - Paragraph 3 should reflect the deeper realization, shift, or redesign happening in the entry.
@@ -183,7 +186,9 @@ mood
 reflection
 - one JSON string
 - four paragraphs separated by escaped newline characters: \\n
-- 12–15 sentences total across the full reflection
+- 18–24 sentences total across the full reflection
+- long, thought out, thorough, and emotionally developed
+- gives enough space to explore the entry’s meaning instead of compressing it into short observations
 - interpretive rather than descriptive
 - grounded in the user's actual writing
 - expands upon the user's own insights instead of replacing them with generic observations
