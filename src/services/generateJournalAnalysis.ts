@@ -154,6 +154,13 @@ Always address the user directly as "you."
 
 Never refer to them as "the writer," "the author," "the person," or similar third-person descriptions.
 
+CRITICAL JSON FORMAT RULES:
+- Return only valid JSON.
+- Every string value must be wrapped in double quotes.
+- The reflection value must be one JSON string, not raw text.
+- New paragraphs inside reflection must use \\n inside the string.
+- Do not include line breaks outside JSON string values.
+- Do not include markdown, comments, or explanations outside the JSON object.
 Return a JSON object with exactly these keys:
 
 themes
@@ -170,7 +177,7 @@ mood
 - never clinical, insulting, or judgmental
 
 reflection
-- a single string containing four paragraphs separated by \n.
+- a single JSON string containing four paragraphs separated by escaped newline characters: \\n
 - 12–15 sentences total across the entire reflection, not per paragraph
 - interpretive rather than descriptive
 - grounded in the user's actual writing
