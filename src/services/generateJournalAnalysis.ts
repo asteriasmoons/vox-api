@@ -34,7 +34,11 @@ export async function generateJournalAnalysis(
 
 Your purpose is to help the user better understand the meaning beneath their journal entry, not to summarize it.
 
-Read the entire journal entry carefully before writing. Consider all of its subjects, emotional shifts, practical details, relationships, routines, quieter moments, closing thoughts, and changes in tone. The reflection should feel like every part of the entry was noticed rather than only the most emotionally intense sections.
+Read the entire journal entry carefully from beginning to end before writing. Do not skim for only the strongest emotion or the most dramatic event. Treat the entry as a full arc with a beginning, middle, and ending.
+
+Before writing the reflection, mentally divide the entry into its major sections or topic shifts. Make sure the final reflection meaningfully touches the full range of the entry, including early details, middle developments, quieter practical moments, emotional shifts, relationships, routines, creative work, body or health details, closing thoughts, and any small details that seem emotionally relevant.
+
+The reflection should feel like every part of the entry was noticed rather than only the most emotionally intense sections. Do not spend all three paragraphs on one topic unless the entire entry is truly about one topic. If the entry covers multiple subjects, distribute attention across them in a balanced way while still making the reflection feel natural and connected.
 
 The reflection should help the user feel genuinely understood by identifying patterns, emotional logic, recurring priorities, contrasts, values, and observations that naturally emerge from what they wrote. Interpret what the writing suggests without inventing hidden meanings or becoming overly psychological.
 
@@ -59,6 +63,14 @@ Accurate facts are always more important than a more beautiful sentence.
 Use specific details only when they support an observation or interpretation. Do not include details simply to prove you read the entry.
 
 The reflection exists to explain what the entry seems to mean rather than document what happened. If a sentence mostly retells events instead of adding understanding, rewrite or remove it.
+
+Coverage requirement:
+- Paragraph 1 should reflect the opening and early emotional context of the entry.
+- Paragraph 2 should reflect the middle developments, practical details, relationships, routines, actions, or conflicts.
+- Paragraph 3 should reflect the later parts of the entry, closing thoughts, emotional landing place, and the broader meaning that connects the entry together.
+- Each paragraph should include at least one grounded reference to a different part of the entry.
+- Do not let the final response become a list or timeline.
+- The goal is whole-entry interpretation, not chronological summary.
 
 When interpreting:
 - anchor your observations in what the user explicitly wrote
@@ -132,8 +144,8 @@ mood
 - never clinical, insulting, or judgmental
 
 reflection
-- a single string containing two paragraphs separated by \\n.
-- 5–8 sentences each
+- a single string containing three paragraphs separated by \\n.
+- 10–13 sentences each
 - interpretive rather than descriptive
 - grounded in the user's actual writing
 - integrates the full entry instead of focusing on one section
@@ -142,7 +154,7 @@ reflection
       },
       {
         role: "user",
-        content: `Here is my journal entry. Read it fully from beginning to end before responding. Reflect the full shape of the entry, including the major topics, emotional shifts, quieter details, and closing thoughts. Include enough specific context that the reflection feels genuinely connected to what I actually wrote, but do not turn it into a recap.
+        content: `Here is my journal entry. Read it fully from beginning to end before responding. Do not skim or focus only on the strongest emotional section. Reflect the full shape of the entry, including the opening, middle, ending, major topics, emotional shifts, quieter details, practical details, relationships, routines, and closing thoughts. Include enough specific context that the reflection feels genuinely connected to what I actually wrote, but do not turn it into a recap.
 
 ${entryText}`,
       },
