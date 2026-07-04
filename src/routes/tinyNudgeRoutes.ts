@@ -7,24 +7,26 @@ import {
 const router = Router();
 
 // POST /api/tiny-nudge/convince-me
-// Body: { taskName: string, friction: string }
+// Body: { taskType: "reminder" | "habit", taskName: string, friction: string }
 router.post("/convince-me", async (req: Request, res: Response) => {
   try {
     const body = req.body as Partial<TinyNudgeRequest>;
 
     if (
+      (body.taskType !== "reminder" && body.taskType !== "habit") ||
       typeof body.taskName !== "string" ||
       !body.taskName.trim() ||
       typeof body.friction !== "string" ||
       !body.friction.trim()
     ) {
       res.status(400).json({
-        error: "taskName and friction are required",
+        error: "taskType, taskName, and friction are required",
       });
       return;
     }
 
     const requestBody: TinyNudgeRequest = {
+      taskType: body.taskType,
       taskName: body.taskName.trim(),
       friction: body.friction.trim(),
     };

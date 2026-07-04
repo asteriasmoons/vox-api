@@ -1,7 +1,10 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = "llama-3.3-70b-versatile";
 
+export type TinyNudgeTaskType = "reminder" | "habit";
+
 export interface TinyNudgeRequest {
+  taskType: TinyNudgeTaskType;
   taskName: string;
   friction: string;
 }
@@ -42,10 +45,10 @@ export async function generateTinyNudge(
         role: "system",
         content: `You are a warm, grounded, emotionally intelligent motivational assistant.
 
-The user has entered a specific friction point that is making a task harder to start or complete.
+The user has entered a specific friction point that is making a reminder or habit harder to start or complete.
 
 Your job is to:
-- Convince them to do the task in a realistic, non-shaming way.
+- Convince them to do the reminder or habit in a realistic, non-shaming way.
 - Speak directly to the specific friction they gave.
 - Make the task feel smaller, more possible, and less emotionally heavy.
 - Give one practical suggestion for reducing the friction.
@@ -69,24 +72,25 @@ Rules:
 - Do not diagnose the user.
 - Do not mention being an AI.
 - Do not use generic productivity advice.
-- Stay specific to the task name and friction.
+- Stay specific to the task type, task name, and friction.
 - The encouragement should feel like a convincing little nudge, not a lecture.
 
 Return only valid JSON.
 
 JSON format:
 {
-  "encouragement": "A short persuasive message convincing the user to do the task.",
-  "frictionSuggestion": "One practical suggestion for making the task easier to start."
+  "encouragement": "A short persuasive message convincing the user to do the reminder or habit.",
+  "frictionSuggestion": "One practical suggestion for making the reminder or habit easier to start."
 }`,
       },
       {
         role: "user",
-        content: `Task name: ${input.taskName}
+        content: `Task type: ${input.taskType}
+Task name: ${input.taskName}
 
 User's friction: ${input.friction}
 
-Convince me to do this task and give me one suggestion for reducing the friction.`,
+Convince me to do this ${input.taskType} and give me one suggestion for reducing the friction.`,
       },
     ],
   };
