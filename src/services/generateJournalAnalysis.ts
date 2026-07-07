@@ -1,5 +1,5 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "meta-llama/llama-prompt-guard-2-22m";
+const MODEL = "llama-3.3-70b-versatile";
 
 export interface JournalAnalysisResult {
   themes: string[];
