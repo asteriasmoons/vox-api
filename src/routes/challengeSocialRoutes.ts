@@ -18,7 +18,7 @@ import {
   getActiveAnnouncements,
   updateAnnouncementActive,
   deleteAnnouncement,
-} from "../services/lumeyChallengeSocialService";
+} from "../services/challengeSocialService";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -32,7 +32,7 @@ router.get("/feed", async (_req: Request, res: Response) => {
 
     return res.status(200).json(feed);
   } catch (error) {
-    console.error("[lumey-challenges] feed:", error);
+    console.error("[challenges] feed:", error);
 
     return res.status(500).json({
       message: "Unable to load the challenge feed.",
@@ -49,7 +49,7 @@ router.post("/submissions", async (req: Request, res: Response) => {
 
     return res.status(201).json(submission);
   } catch (error: any) {
-    console.error("[lumey-challenges] create submission:", error);
+    console.error("[challenges] create submission:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to create submission.",
@@ -81,7 +81,7 @@ router.post(
 
       return res.status(200).json(result);
     } catch (error: any) {
-      console.error("[lumey-challenges] approve submission:", error);
+      console.error("[challenges] approve submission:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to approve submission.",
@@ -100,7 +100,7 @@ router.post("/feed/posts", async (req: Request, res: Response) => {
 
     return res.status(201).json(feedItem);
   } catch (error: any) {
-    console.error("[lumey-challenges] create feed post:", error);
+    console.error("[challenges] create feed post:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to create feed post.",
@@ -126,7 +126,7 @@ router.delete("/feed/posts/:postID", async (req: Request, res: Response) => {
 
     return res.sendStatus(204);
   } catch (error: any) {
-    console.error("[lumey-challenges] delete feed post:", error);
+    console.error("[challenges] delete feed post:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to delete feed post.",
@@ -148,7 +148,7 @@ router.post("/feed/upload-photo", upload.single("photo"), async (req: Request, r
 
     return res.status(201).json(result);
   } catch (error: any) {
-    console.error("[lumey-challenges] upload feed photo:", error);
+    console.error("[challenges] upload feed photo:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to upload feed photo.",
@@ -170,7 +170,7 @@ router.post("/profiles/upload-avatar", upload.single("avatar"), async (req: Requ
 
     return res.status(201).json(result);
   } catch (error: any) {
-    console.error("[lumey-challenges] upload profile avatar:", error);
+    console.error("[challenges] upload profile avatar:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to upload profile avatar.",
@@ -200,7 +200,7 @@ router.post(
 
       return res.status(200).json(result);
     } catch (error: any) {
-      console.error("[lumey-challenges] like feed item:", error);
+      console.error("[challenges] like feed item:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to update like.",
@@ -236,7 +236,7 @@ router.post(
 
       return res.status(201).json(comment);
     } catch (error: any) {
-      console.error("[lumey-challenges] add feed item comment:", error);
+      console.error("[challenges] add feed item comment:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to add comment.",
@@ -262,7 +262,7 @@ router.delete("/comments/:commentID", async (req: Request, res: Response) => {
 
     return res.sendStatus(204);
   } catch (error: any) {
-    console.error("[lumey-challenges] delete comment:", error);
+    console.error("[challenges] delete comment:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to delete comment.",
@@ -290,7 +290,7 @@ router.post("/comments/:commentID/like", async (req: Request, res: Response) => 
 
     return res.status(200).json(result);
   } catch (error: any) {
-    console.error("[lumey-challenges] like comment:", error);
+    console.error("[challenges] like comment:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to update comment like.",
@@ -315,7 +315,7 @@ router.get("/profiles/:userID", async (req: Request, res: Response) => {
 
     return res.status(200).json(profile);
   } catch (error: any) {
-    console.error("[lumey-challenges] profile:", error);
+    console.error("[challenges] profile:", error);
 
     return res.status(404).json({
       message: error?.message ?? "Profile not found.",
@@ -340,7 +340,7 @@ router.put("/profiles/:userID", async (req: Request, res: Response) => {
 
     return res.status(200).json(profile);
   } catch (error: any) {
-    console.error("[lumey-challenges] update profile:", error);
+    console.error("[challenges] update profile:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to update profile.",
@@ -358,7 +358,7 @@ router.post("/feed/announcements", async (req: Request, res: Response) => {
 
     return res.status(201).json(announcement);
   } catch (error: any) {
-    console.error("[lumey-challenges] create announcement:", error);
+    console.error("[challenges] create announcement:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to create announcement.",
@@ -375,7 +375,7 @@ router.get("/feed/announcements", async (_req: Request, res: Response) => {
 
     return res.status(200).json(announcements);
   } catch (error: any) {
-    console.error("[lumey-challenges] get announcements:", error);
+    console.error("[challenges] get announcements:", error);
 
     return res.status(500).json({
       message: error?.message ?? "Unable to load announcements.",
@@ -406,7 +406,7 @@ router.put(
 
       return res.status(200).json(announcement);
     } catch (error: any) {
-      console.error("[lumey-challenges] update announcement:", error);
+      console.error("[challenges] update announcement:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to update announcement.",
@@ -434,7 +434,7 @@ router.delete(
 
       return res.sendStatus(204);
     } catch (error: any) {
-      console.error("[lumey-challenges] delete announcement:", error);
+      console.error("[challenges] delete announcement:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to delete announcement.",

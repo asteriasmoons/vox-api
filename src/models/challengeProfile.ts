@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyChallengeProfileSchema = new mongoose.Schema(
+const challengeProfileSchema = new mongoose.Schema(
   {
     userID: {
       type: String,
@@ -68,4 +68,4 @@ const lumeyChallengeProfileSchema = new mongoose.Schema(
 
 export const LumeyChallengeProfile =
   lumeyDB.models.LumeyChallengeProfile ||
-  lumeyDB.model("LumeyChallengeProfile", lumeyChallengeProfileSchema);
+  lumeyDB.model("LumeyChallengeProfile", challengeProfileSchema);

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyConversationSchema = new mongoose.Schema(
+const conversationSchema = new mongoose.Schema(
   {
     // Sorted pair of userIDs for unique constraint
     participantA: {
@@ -61,11 +61,11 @@ const lumeyConversationSchema = new mongoose.Schema(
 );
 
 // One conversation per unique pair
-lumeyConversationSchema.index(
+conversationSchema.index(
   { participantA: 1, participantB: 1 },
   { unique: true },
 );
 
 export const LumeyConversation =
   lumeyDB.models.LumeyConversation ||
-  lumeyDB.model("LumeyConversation", lumeyConversationSchema);
+  lumeyDB.model("LumeyConversation", conversationSchema);

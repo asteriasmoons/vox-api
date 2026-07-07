@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-export type LumeyChallengeFeedItemType = "submission" | "post";
+export type ChallengeFeedItemType = "submission" | "post";
 
-const lumeyChallengeFeedItemSchema = new mongoose.Schema(
+const challengeFeedItemSchema = new mongoose.Schema(
   {
     feedType: {
       type: String,
@@ -97,7 +97,7 @@ const lumeyChallengeFeedItemSchema = new mongoose.Schema(
 );
 
 // A feed item should be either a submission item or a post item.
-lumeyChallengeFeedItemSchema.pre("validate", function (next) {
+challengeFeedItemSchema.pre("validate", function (next) {
   if (this.feedType === "submission" && !this.submissionID) {
     return next(
       new Error("submissionID is required for submission feed items."),
@@ -131,4 +131,4 @@ lumeyChallengeFeedItemSchema.pre("validate", function (next) {
 
 export const LumeyChallengeFeedItem =
   lumeyDB.models.LumeyChallengeFeedItem ||
-  lumeyDB.model("LumeyChallengeFeedItem", lumeyChallengeFeedItemSchema);
+  lumeyDB.model("LumeyChallengeFeedItem", challengeFeedItemSchema);

@@ -6,7 +6,7 @@ import {
   sendMessage,
   markMessagesRead,
   getMessageableUsers,
-} from "../services/lumeyMessagingService";
+} from "../services/messagingService";
 
 const router = Router();
 
@@ -25,7 +25,7 @@ router.get("/conversations", async (req: Request, res: Response) => {
 
     return res.status(200).json(conversations);
   } catch (error: any) {
-    console.error("[lumey-messages] conversations:", error);
+    console.error("[messages] conversations:", error);
 
     return res.status(500).json({
       message: error?.message ?? "Unable to load conversations.",
@@ -43,7 +43,7 @@ router.post("/conversations", async (req: Request, res: Response) => {
 
     return res.status(201).json(conversation);
   } catch (error: any) {
-    console.error("[lumey-messages] create conversation:", error);
+    console.error("[messages] create conversation:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to create conversation.",
@@ -71,7 +71,7 @@ router.get(
 
       return res.status(200).json(messages);
     } catch (error: any) {
-      console.error("[lumey-messages] get messages:", error);
+      console.error("[messages] get messages:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to load messages.",
@@ -105,7 +105,7 @@ router.post(
 
       return res.status(201).json(message);
     } catch (error: any) {
-      console.error("[lumey-messages] send message:", error);
+      console.error("[messages] send message:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to send message.",
@@ -135,7 +135,7 @@ router.post(
 
       return res.status(200).json(result);
     } catch (error: any) {
-      console.error("[lumey-messages] mark read:", error);
+      console.error("[messages] mark read:", error);
 
       return res.status(400).json({
         message: error?.message ?? "Unable to mark messages as read.",
@@ -159,7 +159,7 @@ router.get("/messageable-users", async (req: Request, res: Response) => {
 
     return res.status(200).json(users);
   } catch (error: any) {
-    console.error("[lumey-messages] messageable users:", error);
+    console.error("[messages] messageable users:", error);
 
     return res.status(400).json({
       message: error?.message ?? "Unable to load messageable users.",

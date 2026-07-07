@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyChallengeFollowSchema = new mongoose.Schema(
+const challengeFollowSchema = new mongoose.Schema(
   {
     followerUserID: {
       type: String,
@@ -26,7 +26,7 @@ const lumeyChallengeFollowSchema = new mongoose.Schema(
 );
 
 // Prevent duplicate follows
-lumeyChallengeFollowSchema.index(
+challengeFollowSchema.index(
   {
     followerUserID: 1,
     followingUserID: 1,
@@ -37,7 +37,7 @@ lumeyChallengeFollowSchema.index(
 );
 
 // Prevent users from following themselves
-lumeyChallengeFollowSchema.pre("save", function (next) {
+challengeFollowSchema.pre("save", function (next) {
   if (this.followerUserID === this.followingUserID) {
     return next(new Error("Users cannot follow themselves."));
   }
@@ -47,4 +47,4 @@ lumeyChallengeFollowSchema.pre("save", function (next) {
 
 export const LumeyChallengeFollow =
   lumeyDB.models.LumeyChallengeFollow ||
-  lumeyDB.model("LumeyChallengeFollow", lumeyChallengeFollowSchema);
+  lumeyDB.model("LumeyChallengeFollow", challengeFollowSchema);

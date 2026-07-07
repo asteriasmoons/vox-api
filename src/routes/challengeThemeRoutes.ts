@@ -2,8 +2,8 @@ import { Router, Request, Response } from "express";
 import {
   ChallengeAIValidationPacket,
   ChallengeAIValidationResponse,
-  validateLumeyChallengeTheme,
-} from "../services/lumeyChallengeThemeValidationService";
+  validateChallengeTheme,
+} from "../services/challengeThemeValidationService";
 
 const router = Router();
 
@@ -44,16 +44,16 @@ router.post(
         });
       }
 
-      const result = await validateLumeyChallengeTheme(packet);
+      const result = await validateChallengeTheme(packet);
 
       return res.status(200).json(result);
     } catch (error) {
-      console.error("[lumey-challenges] Theme validation failed:", error);
+      console.error("[challenges] Theme validation failed:", error);
 
       return res.status(500).json({
         status: "needsMoreInfo",
         message:
-          "Lumey could not validate this challenge right now. Please try again soon.",
+          "Could not validate this challenge right now. Please try again soon.",
       });
     }
   },

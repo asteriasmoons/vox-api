@@ -21,9 +21,9 @@ import checklistRoutes from "./routes/checklist";
 import bookSearchRouter from "./routes/bookSearch";
 import groceryPriceRouter from "./routes/grocery-price";
 import challengeRoutes from "./routes/challenge";
-import lumeyChallengeRoutes from "./routes/lumeyChallengeRoutes";
-import lumeyChallengeSocialRoutes from "./routes/lumeyChallengeSocialRoutes";
-import lumeyMessagingRoutes from "./routes/lumeyMessagingRoutes";
+import challengeThemeRoutes from "./routes/challengeThemeRoutes";
+import challengeSocialRoutes from "./routes/challengeSocialRoutes";
+import messagingRoutes from "./routes/messagingRoutes";
 import tinyNudgeRoutes from "./routes/tinyNudgeRoutes";
 
 import path from "path";
@@ -62,9 +62,9 @@ app.use("/api/checklist", checklistRoutes);
 app.use("/api/books/search", bookSearchRouter);
 app.use("/api/grocery-price", groceryPriceRouter);
 app.use("/api/challenge", challengeRoutes);
-app.use("/api/lumey/challenges", lumeyChallengeRoutes);
-app.use("/api/lumey/challenges", lumeyChallengeSocialRoutes);
-app.use("/api/lumey/messages", lumeyMessagingRoutes);
+app.use("/api/lumey/challenges", challengeThemeRoutes);
+app.use("/api/lumey/challenges", challengeSocialRoutes);
+app.use("/api/lumey/messages", messagingRoutes);
 app.use("/api/tiny-nudge", tinyNudgeRoutes);
 
 io.on("connection", (socket) => {

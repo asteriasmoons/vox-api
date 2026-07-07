@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyChallengeCommentLikeSchema = new mongoose.Schema(
+const challengeCommentLikeSchema = new mongoose.Schema(
   {
     commentID: {
       type: mongoose.Schema.Types.ObjectId,
@@ -25,7 +25,7 @@ const lumeyChallengeCommentLikeSchema = new mongoose.Schema(
   },
 );
 
-lumeyChallengeCommentLikeSchema.index(
+challengeCommentLikeSchema.index(
   {
     commentID: 1,
     userID: 1,
@@ -37,4 +37,4 @@ lumeyChallengeCommentLikeSchema.index(
 
 export const LumeyChallengeCommentLike =
   lumeyDB.models.LumeyChallengeCommentLike ||
-  lumeyDB.model("LumeyChallengeCommentLike", lumeyChallengeCommentLikeSchema);
+  lumeyDB.model("LumeyChallengeCommentLike", challengeCommentLikeSchema);

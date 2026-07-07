@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyChallengeSubmissionSchema = new mongoose.Schema(
+const challengeSubmissionSchema = new mongoose.Schema(
   {
     challengeID: { type: String, required: true },
     entryID: { type: String, default: "" },
@@ -63,4 +63,4 @@ const lumeyChallengeSubmissionSchema = new mongoose.Schema(
 
 export const LumeyChallengeSubmission =
   lumeyDB.models.LumeyChallengeSubmission ||
-  lumeyDB.model("LumeyChallengeSubmission", lumeyChallengeSubmissionSchema);
+  lumeyDB.model("LumeyChallengeSubmission", challengeSubmissionSchema);

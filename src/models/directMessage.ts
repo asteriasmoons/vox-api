@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyDirectMessageSchema = new mongoose.Schema(
+const directMessageSchema = new mongoose.Schema(
   {
     conversationID: {
       type: mongoose.Schema.Types.ObjectId,
@@ -44,8 +44,8 @@ const lumeyDirectMessageSchema = new mongoose.Schema(
   },
 );
 
-lumeyDirectMessageSchema.index({ conversationID: 1, createdDate: 1 });
+directMessageSchema.index({ conversationID: 1, createdDate: 1 });
 
 export const LumeyDirectMessage =
   lumeyDB.models.LumeyDirectMessage ||
-  lumeyDB.model("LumeyDirectMessage", lumeyDirectMessageSchema);
+  lumeyDB.model("LumeyDirectMessage", directMessageSchema);

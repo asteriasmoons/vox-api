@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyChallengePostSchema = new mongoose.Schema(
+const challengePostSchema = new mongoose.Schema(
   {
     userID: {
       type: String,
@@ -107,7 +107,7 @@ const lumeyChallengePostSchema = new mongoose.Schema(
 );
 
 // Every post must contain either text, a photo, or both.
-lumeyChallengePostSchema.pre("validate", function (next) {
+challengePostSchema.pre("validate", function (next) {
   const hasText = typeof this.text === "string" && this.text.trim().length > 0;
 
   const hasPhotoURL =
@@ -126,4 +126,4 @@ lumeyChallengePostSchema.pre("validate", function (next) {
 
 export const LumeyChallengePost =
   lumeyDB.models.LumeyChallengePost ||
-  lumeyDB.model("LumeyChallengePost", lumeyChallengePostSchema);
+  lumeyDB.model("LumeyChallengePost", challengePostSchema);

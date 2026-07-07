@@ -1,14 +1,14 @@
-// import { LumeyConversation } from "../models/lumeyConversation";
-// import { LumeyDirectMessage } from "../models/lumeyDirectMessage";
-// import { LumeyChallengeFollow } from "../models/lumeyChallengeFollow";
-// import { LumeyChallengeProfile } from "../models/lumeyChallengeProfile";
+// import { LumeyConversation } from "../models/conversation";
+// import { LumeyDirectMessage } from "../models/directMessage";
+// import { LumeyChallengeFollow } from "../models/challengeFollow";
+// import { LumeyChallengeProfile } from "../models/challengeProfile";
 
 import type { Model } from "mongoose";
 
-import { LumeyConversation as LumeyConversationRaw } from "../models/lumeyConversation";
-import { LumeyDirectMessage as LumeyDirectMessageRaw } from "../models/lumeyDirectMessage";
-import { LumeyChallengeFollow as LumeyChallengeFollowRaw } from "../models/lumeyChallengeFollow";
-import { LumeyChallengeProfile as LumeyChallengeProfileRaw } from "../models/lumeyChallengeProfile";
+import { LumeyConversation as LumeyConversationRaw } from "../models/conversation";
+import { LumeyDirectMessage as LumeyDirectMessageRaw } from "../models/directMessage";
+import { LumeyChallengeFollow as LumeyChallengeFollowRaw } from "../models/challengeFollow";
+import { LumeyChallengeProfile as LumeyChallengeProfileRaw } from "../models/challengeProfile";
 
 const LumeyConversation = LumeyConversationRaw as Model<any>;
 const LumeyDirectMessage = LumeyDirectMessageRaw as Model<any>;

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { lumeyDB } from "../config/databases";
 
-const lumeyFeedAnnouncementSchema = new mongoose.Schema(
+const feedAnnouncementSchema = new mongoose.Schema(
   {
     title: {
       type: String,
@@ -59,4 +59,4 @@ const lumeyFeedAnnouncementSchema = new mongoose.Schema(
 
 export const LumeyFeedAnnouncement =
   lumeyDB.models.LumeyFeedAnnouncement ||
-  lumeyDB.model("LumeyFeedAnnouncement", lumeyFeedAnnouncementSchema);
+  lumeyDB.model("LumeyFeedAnnouncement", feedAnnouncementSchema);

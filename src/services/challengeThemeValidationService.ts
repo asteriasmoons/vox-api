@@ -28,7 +28,7 @@ export interface ChallengeAIValidationResponse {
   message: string;
 }
 
-export async function validateLumeyChallengeTheme(
+export async function validateChallengeTheme(
   input: ChallengeAIValidationPacket,
 ): Promise<ChallengeAIValidationResponse> {
   const apiKey = process.env.GROQ_API_KEY;
@@ -44,9 +44,9 @@ export async function validateLumeyChallengeTheme(
     messages: [
       {
         role: "system",
-        content: `You are Lumey's reading challenge validation assistant.
+        content: `You are a reading challenge validation assistant.
 
-Your job is to decide whether a user's linked books, metadata, review text, and submission note satisfy a fuzzy or theme-based Lumey reading challenge.
+Your job is to decide whether a user's linked books, metadata, review text, and submission note satisfy a fuzzy or theme-based reading challenge.
 
 Return a JSON object with exactly these keys:
 - "status": "approved" | "needsMoreInfo" | "rejected"
@@ -99,7 +99,7 @@ Rules:
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    console.error("[lumey-challenge-theme] Groq error body:", text);
+    console.error("[challenge-theme] Groq error body:", text);
     throw new Error(`Groq error ${resp.status}: ${text}`);
   }
 
@@ -111,7 +111,7 @@ Rules:
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    console.error("[lumey-challenge-theme] JSON parse error:", error);
+    console.error("[challenge-theme] JSON parse error:", error);
     throw new Error(`Failed to parse Groq JSON response: ${raw}`);
   }
 
