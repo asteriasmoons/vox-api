@@ -1,6 +1,6 @@
 // src/models/UserProfile.ts
 import { Schema, Document, Model } from "mongoose";
-import { lumeyDB, lunixiaDB } from "../config/databases";
+import { lumeyDB, lunixiaDB, voxTermDB } from "../config/databases";
 
 export interface IUserProfile extends Document {
   userId: string;
@@ -24,3 +24,7 @@ export const LumeyUserProfile: Model<IUserProfile> =
 export const LunixiaUserProfile: Model<IUserProfile> =
   (lunixiaDB.models.UserProfile as Model<IUserProfile>) ||
   lunixiaDB.model<IUserProfile>("UserProfile", UserProfileSchema);
+
+export const VoxTermUserProfile: Model<IUserProfile> =
+  (voxTermDB.models.UserProfile as Model<IUserProfile>) ||
+  voxTermDB.model<IUserProfile>("UserProfile", UserProfileSchema);
