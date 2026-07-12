@@ -60,14 +60,26 @@ router.get("/discover", async (req: Request, res: Response) => {
   try {
     const filters: DiscoverFilters = {
       page: readPositiveInteger(req.query.page, 1),
-      genreId: readOptionalInteger(req.query.genre),
-      networkId: readOptionalInteger(req.query.network),
-      language: readOptionalString(req.query.language),
       sortBy: readOptionalString(req.query.sort) ?? "popularity.desc",
-      status: normalizeStatus(req.query.status),
-      firstAirDateFrom: readOptionalString(req.query.firstAirDateFrom),
-      firstAirDateTo: readOptionalString(req.query.firstAirDateTo),
     };
+
+    const genreId = readOptionalInteger(req.query.genre);
+    const networkId = readOptionalInteger(req.query.network);
+    const language = readOptionalString(req.query.language);
+    const status = normalizeStatus(req.query.status);
+    const firstAirDateFrom = readOptionalString(req.query.firstAirDateFrom);
+    const firstAirDateTo = readOptionalString(req.query.firstAirDateTo);
+
+    if (genreId !== undefined) filters.genreId = genreId;
+    if (networkId !== undefined) filters.networkId = networkId;
+    if (language !== undefined) filters.language = language;
+    if (status !== undefined) filters.status = status;
+    if (firstAirDateFrom !== undefined) {
+      filters.firstAirDateFrom = firstAirDateFrom;
+    }
+    if (firstAirDateTo !== undefined) {
+      filters.firstAirDateTo = firstAirDateTo;
+    }
 
     const data = await seeryService.discoverSeries(filters);
     res.status(200).json({ success: true, data });
@@ -194,14 +206,26 @@ router.get("/genres", async (_req: Request, res: Response) => {
 
 function sendError(res: Response, error: unknown): void {
   if (error instanceof SeeryServiceError) {
-    res.status(error.statusCode).json({
+    const payload: {
+      success: false;
+      error: {
+        code: string;
+        message: string;
+        details?: unknown;
+      };
+    } = {
       success: false,
       error: {
         code: error.code,
         message: error.message,
-        details: error.details,
       },
-    });
+    };
+
+    if (error.details !== undefined) {
+      payload.error.details = error.details;
+    }
+
+    res.status(error.statusCode).json(payload);
     return;
   }
 
@@ -247,8 +271,9 @@ function readOptionalInteger(value: unknown): number | undefined {
   return Number.isInteger(parsed) ? parsed : undefined;
 }
 
-function readId(value: string, field: string): number {
-  const parsed = Number(value);
+function readId(value: unknown, field: string): number {
+  const normalized = readRouteParameter(value, field);
+  const parsed = Number(normalized);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new SeeryServiceError(
       400,
@@ -259,8 +284,9 @@ function readId(value: string, field: string): number {
   return parsed;
 }
 
-function readNonNegativeInteger(value: string, field: string): number {
-  const parsed = Number(value);
+function readNonNegativeInteger(value: unknown, field: string): number {
+  const normalized = readRouteParameter(value, field);
+  const parsed = Number(normalized);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new SeeryServiceError(
       400,
@@ -269,6 +295,27 @@ function readNonNegativeInteger(value: string, field: string): number {
     );
   }
   return parsed;
+}
+
+function readRouteParameter(value: unknown, field: string): string {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.length === 1 &&
+    typeof value[0] === "string" &&
+    value[0].trim().length > 0
+  ) {
+    return value[0].trim();
+  }
+
+  throw new SeeryServiceError(
+    400,
+    "SEERY_INVALID_REQUEST",
+    `${field} is required and must be a single value.`
+  );
 }
 
 function normalizeStatus(value: unknown): DiscoverFilters["status"] {
