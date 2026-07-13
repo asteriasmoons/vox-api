@@ -6,6 +6,8 @@ import {
   MoodStatsPhoneBehaviorInput,
   MoodStatsSummaryInput,
 } from "../services/generateMoodStatsContext";
+import { analyzeMood, MoodAnalysisInput } from "../services/analyzeMood";
+import { MoodAnalysis } from "../models/MoodAnalysis";
 
 const router = Router();
 
@@ -101,5 +103,105 @@ function isValidPhoneBehavior(value: unknown): value is MoodStatsPhoneBehaviorIn
     Number.isFinite(behavior.notificationCount)
   );
 }
+
+// POST /api/mood/analyze
+// Analyze a mood log via AI and save the result
+router.post("/analyze", async (req: Request, res: Response) => {
+  try {
+    const { userId, moodEntryId, emotions, activities, sleepHours, exerciseMinutes, steps, meditationMinutes, waterOz, note, timestamp } = req.body;
+
+    if (!userId || !moodEntryId) {
+      res.status(400).json({ error: "userId and moodEntryId are required" });
+      return;
+    }
+
+    if (!Array.isArray(emotions) || emotions.length === 0) {
+      res.status(400).json({ error: "emotions array is required" });
+      return;
+    }
+
+    const input: MoodAnalysisInput = {
+      emotions,
+      activities: activities || [],
+      sleepHours: sleepHours || 0,
+      exerciseMinutes: exerciseMinutes || 0,
+      steps: steps || 0,
+      meditationMinutes: meditationMinutes || 0,
+      waterOz: waterOz || 0,
+      note: note || "",
+      timestamp: timestamp || new Date().toISOString(),
+    };
+
+    const result = await analyzeMood(input);
+
+    // Save to MongoDB
+    const doc = await MoodAnalysis.create({
+      userId,
+      moodEntryId,
+      timestamp: input.timestamp,
+      mindset: result.mindset,
+      emotionalBalance: result.emotionalBalance,
+      influences: result.influences,
+      reflection: result.reflection,
+      themes: result.themes,
+      emotions: emotions.map((e: any) => e.name),
+      activities: activities || [],
+    });
+
+    res.json({
+      id: doc._id,
+      mindset: result.mindset,
+      emotionalBalance: result.emotionalBalance,
+      influences: result.influences,
+      reflection: result.reflection,
+      themes: result.themes,
+      createdAt: doc.createdAt,
+    });
+  } catch (err: any) {
+    console.error("[mood/analyze] Error:", err?.message ?? err);
+    res.status(500).json({ error: err?.message ?? "Failed to analyze mood" });
+  }
+});
+
+// GET /api/mood/analyze/history?userId=X&moodEntryId=Y
+// Fetch all past analyses for a specific mood log
+router.get("/analyze/history", async (req: Request, res: Response) => {
+  try {
+    const userId = String(req.query?.userId || "").trim();
+    const moodEntryId = String(req.query?.moodEntryId || "").trim();
+
+    if (!userId) {
+      res.status(400).json({ error: "userId is required" });
+      return;
+    }
+
+    const query: any = { userId };
+    if (moodEntryId) query.moodEntryId = moodEntryId;
+
+    const analyses = await MoodAnalysis.find(query)
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    res.json({
+      analyses: analyses.map((a) => ({
+        id: a._id,
+        moodEntryId: a.moodEntryId,
+        timestamp: a.timestamp,
+        mindset: a.mindset,
+        emotionalBalance: a.emotionalBalance,
+        influences: a.influences,
+        reflection: a.reflection,
+        themes: a.themes,
+        emotions: a.emotions,
+        activities: a.activities,
+        createdAt: a.createdAt,
+      })),
+    });
+  } catch (err: any) {
+    console.error("[mood/analyze/history] Error:", err?.message ?? err);
+    res.status(500).json({ error: err?.message ?? "Failed to fetch history" });
+  }
+});
 
 export default router;
