@@ -120,6 +120,29 @@ router.post("/analyze", async (req: Request, res: Response) => {
       return;
     }
 
+    // Cap: one analysis per mood log per calendar day
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const existing = await MoodAnalysis.findOne({
+      userId,
+      moodEntryId,
+      createdAt: { $gte: todayStart },
+    }).lean();
+
+    if (existing) {
+      res.json({
+        id: existing._id,
+        mindset: existing.mindset,
+        emotionalBalance: existing.emotionalBalance,
+        influences: existing.influences,
+        reflection: existing.reflection,
+        themes: existing.themes,
+        createdAt: existing.createdAt,
+        cached: true,
+      });
+      return;
+    }
+
     const input: MoodAnalysisInput = {
       emotions,
       activities: activities || [],
