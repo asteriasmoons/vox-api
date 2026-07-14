@@ -158,6 +158,19 @@ router.get("/trending", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/seery/airing-today?page=1
+ */
+router.get("/airing-today", async (req: Request, res: Response) => {
+  try {
+    const page = readOptionalPositiveInt(req.query.page) ?? 1;
+    const data = await tmdbService.airingToday(page);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/**
  * GET /api/seery/discover?page=1&sort_by=popularity.desc&with_genres=18&...
  */
 router.get("/discover", async (req: Request, res: Response) => {

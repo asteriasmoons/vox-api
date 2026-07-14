@@ -720,6 +720,23 @@ export class SeeryTMDBService {
     };
   }
 
+  // ── Airing Today ─────────────────────────────────────────────
+
+  async airingToday(
+    page = 1
+  ): Promise<SeeryPagedResponse<SeeryTMDBSeriesSummary>> {
+    const data = await this.request<TMDBPagedResponse>("/tv/airing_today", {
+      page,
+    });
+
+    return {
+      page: data.page,
+      totalPages: data.total_pages,
+      totalResults: data.total_results,
+      results: data.results.map((r: TMDBTVResult) => this.mapTMDBSeries(r)),
+    };
+  }
+
   // ── Discover ─────────────────────────────────────────────────
 
   async discover(filters: {
