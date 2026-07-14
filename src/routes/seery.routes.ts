@@ -1,36 +1,45 @@
 import { Router, type Request, type Response } from "express";
 import {
   SeeryService,
+  SeeryTMDBService,
+  SeeryIDMapper,
   SeeryServiceError,
-  type DiscoverFilters,
 } from "../services/seery.service";
 
 const router = Router();
 const seeryService = new SeeryService();
+const tmdbService = new SeeryTMDBService();
+const idMapper = new SeeryIDMapper(seeryService, tmdbService);
 
-/**
- * GET /api/seery/health
- * Confirms that the Seery route module is mounted and that TMDB is configured.
- */
+// ═══════════════════════════════════════════════════════════════════
+// Health
+// ═══════════════════════════════════════════════════════════════════
+
 router.get("/health", async (_req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     data: {
       service: "seery",
-      configured: seeryService.isConfigured,
+      configured: seeryService.isConfigured && tmdbService.isConfigured,
+      providers: {
+        tvmaze: { configured: seeryService.isConfigured },
+        tmdb: { configured: tmdbService.isConfigured },
+      },
     },
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// TVmaze Routes (primary)
+// ═══════════════════════════════════════════════════════════════════
+
 /**
- * GET /api/seery/search?query=severance&page=1
+ * GET /api/seery/search?query=severance
  */
 router.get("/search", async (req: Request, res: Response) => {
   try {
     const query = readRequiredString(req.query.query, "query");
-    const page = readPositiveInteger(req.query.page, 1);
-
-    const data = await seeryService.searchSeries(query, page);
+    const data = await seeryService.searchSeries(query);
     res.status(200).json({ success: true, data });
   } catch (error) {
     sendError(res, error);
@@ -38,15 +47,13 @@ router.get("/search", async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/seery/trending?window=day&page=1
- * window accepts "day" or "week".
+ * GET /api/seery/schedule?date=2026-07-13&country=US
  */
-router.get("/trending", async (req: Request, res: Response) => {
+router.get("/schedule", async (req: Request, res: Response) => {
   try {
-    const window = req.query.window === "day" ? "day" : "week";
-    const page = readPositiveInteger(req.query.page, 1);
-
-    const data = await seeryService.getTrendingSeries(window, page);
+    const date = readOptionalString(req.query.date);
+    const country = readOptionalString(req.query.country) ?? "US";
+    const data = await seeryService.getSchedule(date, country);
     res.status(200).json({ success: true, data });
   } catch (error) {
     sendError(res, error);
@@ -54,34 +61,12 @@ router.get("/trending", async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/seery/discover?page=1&genre=18&status=returning&sort=popularity.desc
+ * GET /api/seery/schedule/web?date=2026-07-13
  */
-router.get("/discover", async (req: Request, res: Response) => {
+router.get("/schedule/web", async (req: Request, res: Response) => {
   try {
-    const filters: DiscoverFilters = {
-      page: readPositiveInteger(req.query.page, 1),
-      sortBy: readOptionalString(req.query.sort) ?? "popularity.desc",
-    };
-
-    const genreId = readOptionalInteger(req.query.genre);
-    const networkId = readOptionalInteger(req.query.network);
-    const language = readOptionalString(req.query.language);
-    const status = normalizeStatus(req.query.status);
-    const firstAirDateFrom = readOptionalString(req.query.firstAirDateFrom);
-    const firstAirDateTo = readOptionalString(req.query.firstAirDateTo);
-
-    if (genreId !== undefined) filters.genreId = genreId;
-    if (networkId !== undefined) filters.networkId = networkId;
-    if (language !== undefined) filters.language = language;
-    if (status !== undefined) filters.status = status;
-    if (firstAirDateFrom !== undefined) {
-      filters.firstAirDateFrom = firstAirDateFrom;
-    }
-    if (firstAirDateTo !== undefined) {
-      filters.firstAirDateTo = firstAirDateTo;
-    }
-
-    const data = await seeryService.discoverSeries(filters);
+    const date = readOptionalString(req.query.date);
+    const data = await seeryService.getWebSchedule(date);
     res.status(200).json({ success: true, data });
   } catch (error) {
     sendError(res, error);
@@ -89,16 +74,12 @@ router.get("/discover", async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/seery/series/:seriesId
- * Returns details, credits, external IDs, content ratings, videos,
- * recommendations, similar shows, keywords, and watch providers.
+ * GET /api/seery/series/:showId
  */
-router.get("/series/:seriesId", async (req: Request, res: Response) => {
+router.get("/series/:showId", async (req: Request, res: Response) => {
   try {
-    const seriesId = readId(req.params.seriesId, "seriesId");
-    const region = readOptionalString(req.query.region) ?? "US";
-
-    const data = await seeryService.getSeriesDetails(seriesId, region);
+    const showId = readId(req.params.showId, "showId");
+    const data = await seeryService.getSeriesDetails(showId);
     res.status(200).json({ success: true, data });
   } catch (error) {
     sendError(res, error);
@@ -106,22 +87,18 @@ router.get("/series/:seriesId", async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/seery/series/:seriesId/season/:seasonNumber
+ * GET /api/seery/series/:showId/season/:seasonNumber
  */
 router.get(
-  "/series/:seriesId/season/:seasonNumber",
+  "/series/:showId/season/:seasonNumber",
   async (req: Request, res: Response) => {
     try {
-      const seriesId = readId(req.params.seriesId, "seriesId");
+      const showId = readId(req.params.showId, "showId");
       const seasonNumber = readNonNegativeInteger(
         req.params.seasonNumber,
         "seasonNumber"
       );
-
-      const data = await seeryService.getSeasonDetails(
-        seriesId,
-        seasonNumber
-      );
+      const data = await seeryService.getSeasonEpisodes(showId, seasonNumber);
       res.status(200).json({ success: true, data });
     } catch (error) {
       sendError(res, error);
@@ -130,16 +107,14 @@ router.get(
 );
 
 /**
- * GET /api/seery/series/:seriesId/recommendations?page=1
+ * GET /api/seery/series/:showId/cast
  */
 router.get(
-  "/series/:seriesId/recommendations",
+  "/series/:showId/cast",
   async (req: Request, res: Response) => {
     try {
-      const seriesId = readId(req.params.seriesId, "seriesId");
-      const page = readPositiveInteger(req.query.page, 1);
-
-      const data = await seeryService.getRecommendations(seriesId, page);
+      const showId = readId(req.params.showId, "showId");
+      const data = await seeryService.getShowCast(showId);
       res.status(200).json({ success: true, data });
     } catch (error) {
       sendError(res, error);
@@ -148,16 +123,14 @@ router.get(
 );
 
 /**
- * GET /api/seery/series/:seriesId/providers?region=US
+ * GET /api/seery/series/:showId/images
  */
 router.get(
-  "/series/:seriesId/providers",
+  "/series/:showId/images",
   async (req: Request, res: Response) => {
     try {
-      const seriesId = readId(req.params.seriesId, "seriesId");
-      const region = readOptionalString(req.query.region) ?? "US";
-
-      const data = await seeryService.getWatchProviders(seriesId, region);
+      const showId = readId(req.params.showId, "showId");
+      const data = await seeryService.getShowImages(showId);
       res.status(200).json({ success: true, data });
     } catch (error) {
       sendError(res, error);
@@ -165,27 +138,39 @@ router.get(
   }
 );
 
+// ═══════════════════════════════════════════════════════════════════
+// TMDB Routes (secondary — trending, discover, genres, recs, etc.)
+// ═══════════════════════════════════════════════════════════════════
+
 /**
- * GET /api/seery/upcoming?startDate=2026-07-12&endDate=2026-08-12&page=1
+ * GET /api/seery/trending?window=day&page=1
  */
-router.get("/upcoming", async (req: Request, res: Response) => {
+router.get("/trending", async (req: Request, res: Response) => {
   try {
-    const startDate =
-      readOptionalString(req.query.startDate) ?? toISODate(new Date());
+    const timeWindow =
+      readOptionalString(req.query.window) === "week" ? "week" : "day";
+    const page = readOptionalPositiveInt(req.query.page) ?? 1;
+    const data = await tmdbService.trending(timeWindow, page);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
 
-    const defaultEnd = new Date();
-    defaultEnd.setDate(defaultEnd.getDate() + 30);
-
-    const endDate =
-      readOptionalString(req.query.endDate) ?? toISODate(defaultEnd);
-
-    const page = readPositiveInteger(req.query.page, 1);
-
-    const data = await seeryService.getUpcomingSeries(
-      startDate,
-      endDate,
-      page
-    );
+/**
+ * GET /api/seery/discover?page=1&sort_by=popularity.desc&with_genres=18&...
+ */
+router.get("/discover", async (req: Request, res: Response) => {
+  try {
+    const data = await tmdbService.discover({
+      page: readOptionalPositiveInt(req.query.page),
+      sortBy: readOptionalString(req.query.sort_by),
+      withGenres: readOptionalString(req.query.with_genres),
+      firstAirDateGte: readOptionalString(req.query["first_air_date.gte"]),
+      firstAirDateLte: readOptionalString(req.query["first_air_date.lte"]),
+      voteAverageGte: readOptionalFloat(req.query["vote_average.gte"]),
+      withStatus: readOptionalString(req.query.with_status),
+    });
     res.status(200).json({ success: true, data });
   } catch (error) {
     sendError(res, error);
@@ -195,14 +180,194 @@ router.get("/upcoming", async (req: Request, res: Response) => {
 /**
  * GET /api/seery/genres
  */
-router.get("/genres", async (_req: Request, res: Response) => {
+router.get("/genres", async (req: Request, res: Response) => {
   try {
-    const data = await seeryService.getGenres();
+    const language = readOptionalString(req.query.language) ?? "en";
+    const data = await tmdbService.genres(language);
     res.status(200).json({ success: true, data });
   } catch (error) {
     sendError(res, error);
   }
 });
+
+/**
+ * GET /api/seery/series/:seriesId/recommendations?page=1
+ *
+ * Accepts a TMDB series ID. If a TVmaze ID is passed, use the
+ * /api/seery/tvmaze/:showId/recommendations endpoint instead.
+ */
+router.get(
+  "/series/:seriesId/recommendations",
+  async (req: Request, res: Response) => {
+    try {
+      const tmdbId = readId(req.params.seriesId, "seriesId");
+      const page = readOptionalPositiveInt(req.query.page) ?? 1;
+      const data = await tmdbService.recommendations(tmdbId, page);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/tvmaze/:showId/recommendations?page=1
+ *
+ * Convenience: maps a TVmaze ID → TMDB ID, then fetches TMDB recommendations.
+ */
+router.get(
+  "/tvmaze/:showId/recommendations",
+  async (req: Request, res: Response) => {
+    try {
+      const tvMazeId = readId(req.params.showId, "showId");
+      const page = readOptionalPositiveInt(req.query.page) ?? 1;
+
+      const tmdbId = await idMapper.tmdbIdFromTVmaze(tvMazeId);
+      if (!tmdbId) {
+        throw new SeeryServiceError(
+          404,
+          "SEERY_TMDB_ID_NOT_FOUND",
+          `Could not find a TMDB match for TVmaze show ${tvMazeId}.`
+        );
+      }
+
+      const data = await tmdbService.recommendations(tmdbId, page);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/series/:seriesId/providers?region=US
+ *
+ * Accepts a TMDB series ID.
+ */
+router.get(
+  "/series/:seriesId/providers",
+  async (req: Request, res: Response) => {
+    try {
+      const tmdbId = readId(req.params.seriesId, "seriesId");
+      const region = readOptionalString(req.query.region) ?? "US";
+      const data = await tmdbService.watchProviders(tmdbId, region);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/tvmaze/:showId/providers?region=US
+ *
+ * Convenience: maps TVmaze ID → TMDB ID, then fetches watch providers.
+ */
+router.get(
+  "/tvmaze/:showId/providers",
+  async (req: Request, res: Response) => {
+    try {
+      const tvMazeId = readId(req.params.showId, "showId");
+      const region = readOptionalString(req.query.region) ?? "US";
+
+      const tmdbId = await idMapper.tmdbIdFromTVmaze(tvMazeId);
+      if (!tmdbId) {
+        throw new SeeryServiceError(
+          404,
+          "SEERY_TMDB_ID_NOT_FOUND",
+          `Could not find a TMDB match for TVmaze show ${tvMazeId}.`
+        );
+      }
+
+      const data = await tmdbService.watchProviders(tmdbId, region);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/series/:seriesId/videos
+ */
+router.get(
+  "/series/:seriesId/videos",
+  async (req: Request, res: Response) => {
+    try {
+      const tmdbId = readId(req.params.seriesId, "seriesId");
+      const data = await tmdbService.videos(tmdbId);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/tvmaze/:showId/videos
+ */
+router.get(
+  "/tvmaze/:showId/videos",
+  async (req: Request, res: Response) => {
+    try {
+      const tvMazeId = readId(req.params.showId, "showId");
+
+      const tmdbId = await idMapper.tmdbIdFromTVmaze(tvMazeId);
+      if (!tmdbId) {
+        throw new SeeryServiceError(
+          404,
+          "SEERY_TMDB_ID_NOT_FOUND",
+          `Could not find a TMDB match for TVmaze show ${tvMazeId}.`
+        );
+      }
+
+      const data = await tmdbService.videos(tmdbId);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════
+// ID Mapping Routes
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/seery/map/tvmaze/:showId
+ * Returns the full ID mapping for a TVmaze show.
+ */
+router.get(
+  "/map/tvmaze/:showId",
+  async (req: Request, res: Response) => {
+    try {
+      const tvMazeId = readId(req.params.showId, "showId");
+      const data = await idMapper.resolveFromTVmaze(tvMazeId);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/map/tmdb/:seriesId
+ * Returns the full ID mapping for a TMDB series.
+ */
+router.get(
+  "/map/tmdb/:seriesId",
+  async (req: Request, res: Response) => {
+    try {
+      const tmdbId = readId(req.params.seriesId, "seriesId");
+      const data = await idMapper.resolveFromTMDB(tmdbId);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+// ─── Helpers ─────────────────────────────────────────────────────
 
 function sendError(res: Response, error: unknown): void {
   if (error instanceof SeeryServiceError) {
@@ -259,18 +424,6 @@ function readOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function readPositiveInteger(value: unknown, fallback: number): number {
-  if (value === undefined) return fallback;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function readOptionalInteger(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) ? parsed : undefined;
-}
-
 function readId(value: unknown, field: string): number {
   const normalized = readRouteParameter(value, field);
   const parsed = Number(normalized);
@@ -297,6 +450,20 @@ function readNonNegativeInteger(value: unknown, field: string): number {
   return parsed;
 }
 
+function readOptionalPositiveInt(value: unknown): number | undefined {
+  const str = readOptionalString(value);
+  if (!str) return undefined;
+  const parsed = Number(str);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function readOptionalFloat(value: unknown): number | undefined {
+  const str = readOptionalString(value);
+  if (!str) return undefined;
+  const parsed = Number(str);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function readRouteParameter(value: unknown, field: string): string {
   if (typeof value === "string" && value.trim().length > 0) {
     return value.trim();
@@ -316,26 +483,6 @@ function readRouteParameter(value: unknown, field: string): string {
     "SEERY_INVALID_REQUEST",
     `${field} is required and must be a single value.`
   );
-}
-
-function normalizeStatus(value: unknown): DiscoverFilters["status"] {
-  const status = readOptionalString(value);
-  const allowed = [
-    "returning",
-    "planned",
-    "in_production",
-    "ended",
-    "canceled",
-    "pilot",
-  ] as const;
-
-  return allowed.includes(status as (typeof allowed)[number])
-    ? (status as DiscoverFilters["status"])
-    : undefined;
-}
-
-function toISODate(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 export default router;
