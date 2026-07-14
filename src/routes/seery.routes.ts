@@ -162,15 +162,23 @@ router.get("/trending", async (req: Request, res: Response) => {
  */
 router.get("/discover", async (req: Request, res: Response) => {
   try {
-    const data = await tmdbService.discover({
-      page: readOptionalPositiveInt(req.query.page),
-      sortBy: readOptionalString(req.query.sort_by),
-      withGenres: readOptionalString(req.query.with_genres),
-      firstAirDateGte: readOptionalString(req.query["first_air_date.gte"]),
-      firstAirDateLte: readOptionalString(req.query["first_air_date.lte"]),
-      voteAverageGte: readOptionalFloat(req.query["vote_average.gte"]),
-      withStatus: readOptionalString(req.query.with_status),
-    });
+    const filters: Parameters<typeof tmdbService.discover>[0] = {};
+    const page = readOptionalPositiveInt(req.query.page);
+    if (page !== undefined) filters.page = page;
+    const sortBy = readOptionalString(req.query.sort_by);
+    if (sortBy !== undefined) filters.sortBy = sortBy;
+    const withGenres = readOptionalString(req.query.with_genres);
+    if (withGenres !== undefined) filters.withGenres = withGenres;
+    const firstAirDateGte = readOptionalString(req.query["first_air_date.gte"]);
+    if (firstAirDateGte !== undefined) filters.firstAirDateGte = firstAirDateGte;
+    const firstAirDateLte = readOptionalString(req.query["first_air_date.lte"]);
+    if (firstAirDateLte !== undefined) filters.firstAirDateLte = firstAirDateLte;
+    const voteAverageGte = readOptionalFloat(req.query["vote_average.gte"]);
+    if (voteAverageGte !== undefined) filters.voteAverageGte = voteAverageGte;
+    const withStatus = readOptionalString(req.query.with_status);
+    if (withStatus !== undefined) filters.withStatus = withStatus;
+
+    const data = await tmdbService.discover(filters);
     res.status(200).json({ success: true, data });
   } catch (error) {
     sendError(res, error);
