@@ -25,6 +25,7 @@ export interface SeerySeriesSummary {
   averageRuntime: number | null;
   network: SeeryNetwork | null;
   webChannel: SeeryWebChannel | null;
+  provider?: "tvmaze" | "tmdb";
 }
 
 export interface SeeryPagedResponse<T> {
@@ -546,6 +547,7 @@ export class SeeryService {
       averageRuntime: show.averageRuntime ?? null,
       network: this.mapNetwork(show.network),
       webChannel: this.mapWebChannel(show.webChannel),
+      provider: "tvmaze",
     };
   }
 
@@ -921,6 +923,244 @@ export class SeeryTMDBService {
     };
   }
 
+  // ── Search TV (for hybrid search) ────────────────────────────
+
+  async searchTV(
+    query: string,
+    page = 1
+  ): Promise<SeeryPagedResponse<SeerySeriesSummary>> {
+    const data = await this.request<TMDBPagedResponse>("/search/tv", {
+      query,
+      page,
+    });
+
+    return {
+      page: data.page,
+      totalPages: data.total_pages,
+      totalResults: data.total_results,
+      results: data.results.map((r: TMDBTVResult) =>
+        this.mapTMDBToSeerySummary(r)
+      ),
+    };
+  }
+
+  // ── Full Series Details (matches TVmaze shape) ──────────────
+
+  async getSeriesDetails(tmdbId: number): Promise<unknown> {
+    const data = await this.request<TMDBTVDetails>(
+      `/tv/${tmdbId}`,
+      { append_to_response: "aggregate_credits,external_ids,images" }
+    );
+
+    const seasons = (data.seasons ?? []).filter(
+      (s) => s.season_number > 0
+    );
+
+    const totalEpisodes = seasons.reduce(
+      (sum, s) => sum + (s.episode_count ?? 0),
+      0
+    );
+
+    const cast: SeeryCastMember[] = (
+      data.aggregate_credits?.cast ?? []
+    )
+      .slice(0, 30)
+      .map((c) => ({
+        person: {
+          id: c.id,
+          name: c.name,
+          birthday: null,
+          gender:
+            c.gender === 1
+              ? "Female"
+              : c.gender === 2
+                ? "Male"
+                : null,
+          country: null,
+          imageURL: c.profile_path
+            ? `${this.imageBase}w185${c.profile_path}`
+            : null,
+        },
+        character: {
+          id: 0,
+          name: c.roles?.[0]?.character ?? "",
+          imageURL: null,
+        },
+        self: false,
+        voice: false,
+      }));
+
+    const crewSeen = new Set<string>();
+    const crew: SeeryCrewMember[] = (
+      data.aggregate_credits?.crew ?? []
+    )
+      .filter((c) => {
+        const job = c.jobs?.[0]?.job ?? c.department ?? "Unknown";
+        const key = `${c.id}-${job}`;
+        if (crewSeen.has(key)) return false;
+        crewSeen.add(key);
+        return true;
+      })
+      .slice(0, 20)
+      .map((c) => ({
+        person: {
+          id: c.id,
+          name: c.name,
+          imageURL: c.profile_path
+            ? `${this.imageBase}w185${c.profile_path}`
+            : null,
+        },
+        type: c.jobs?.[0]?.job ?? c.department ?? "Unknown",
+      }));
+
+    const images: SeeryShowImage[] = [
+      ...(data.images?.posters ?? []),
+      ...(data.images?.backdrops ?? []),
+    ].map((img, index) => ({
+      id: index,
+      type: img.aspect_ratio && img.aspect_ratio < 1 ? "poster" : "background",
+      main: index === 0,
+      resolutions: {
+        original: img.file_path
+          ? `${this.imageBase}original${img.file_path}`
+          : null,
+        medium: img.file_path
+          ? `${this.imageBase}w500${img.file_path}`
+          : null,
+      },
+    }));
+
+    const network = data.networks?.[0] ?? null;
+
+    const externals = {
+      imdb: data.external_ids?.imdb_id ?? null,
+      thetvdb: data.external_ids?.tvdb_id ?? null,
+      tvrage: data.external_ids?.tvrage_id ?? null,
+    };
+
+    // Map schedule from episode_run_time
+    const avgRuntime =
+      data.episode_run_time && data.episode_run_time.length > 0
+        ? Math.round(
+            data.episode_run_time.reduce((a, b) => a + b, 0) /
+              data.episode_run_time.length
+          )
+        : null;
+
+    return {
+      id: data.id,
+      name: data.name,
+      overview: data.overview ?? "",
+      type: data.type ?? null,
+      language: data.original_language ?? null,
+      genres: (data.genres ?? []).map((g) => g.name),
+      status: data.status ?? null,
+      runtime: avgRuntime,
+      averageRuntime: avgRuntime,
+      premiered: data.first_air_date ?? null,
+      ended: data.last_air_date ?? null,
+      officialSite: data.homepage ?? null,
+      schedule: null,
+      rating: data.vote_average ?? null,
+      weight: Math.round(data.popularity ?? 0),
+      posterURL: data.poster_path
+        ? `${this.imageBase}w500${data.poster_path}`
+        : null,
+      backdropURL: data.backdrop_path
+        ? `${this.imageBase}w780${data.backdrop_path}`
+        : null,
+      network: network
+        ? {
+            id: network.id,
+            name: network.name,
+            country: network.origin_country
+              ? { name: "", code: network.origin_country, timezone: "" }
+              : null,
+            officialSite: null,
+          }
+        : null,
+      webChannel: null,
+      externals,
+      numberOfSeasons: seasons.length,
+      numberOfEpisodes: totalEpisodes,
+      seasons: seasons.map(
+        (s): SeerySeasonSummary => ({
+          id: s.id,
+          number: s.season_number,
+          name: s.name || `Season ${s.season_number}`,
+          premiereDate: s.air_date ?? null,
+          endDate: null,
+          episodeOrder: s.episode_count ?? null,
+          network: null,
+          webChannel: null,
+          imageURL: s.poster_path
+            ? `${this.imageBase}w500${s.poster_path}`
+            : null,
+        })
+      ),
+      cast,
+      crew,
+      images,
+      previousEpisode: data.last_episode_to_air
+        ? {
+            href: null,
+            name: data.last_episode_to_air.name ?? null,
+          }
+        : null,
+      nextEpisode: data.next_episode_to_air
+        ? {
+            href: null,
+            name: data.next_episode_to_air.name ?? null,
+          }
+        : null,
+      tvMazeURL: null,
+    };
+  }
+
+  // ── Season Episodes (matches TVmaze shape) ──────────────────
+
+  async getSeasonEpisodes(
+    tmdbId: number,
+    seasonNumber: number
+  ): Promise<unknown> {
+    const data = await this.request<TMDBSeasonDetails>(
+      `/tv/${tmdbId}/season/${seasonNumber}`
+    );
+
+    const episodes: SeeryEpisodeDetails[] = (data.episodes ?? []).map(
+      (ep) => ({
+        id: ep.id,
+        name: ep.name,
+        overview: ep.overview ?? "",
+        airDate: ep.air_date ?? null,
+        airTime: null,
+        airStamp: ep.air_date ? `${ep.air_date}T00:00:00+00:00` : null,
+        episodeNumber: ep.episode_number,
+        seasonNumber: ep.season_number,
+        runtime: ep.runtime ?? null,
+        type: null,
+        rating: ep.vote_average ?? null,
+        stillURL: ep.still_path
+          ? `${this.imageBase}w500${ep.still_path}`
+          : null,
+      })
+    );
+
+    return {
+      id: data.id,
+      name: data.name || `Season ${data.season_number}`,
+      overview: data.overview ?? "",
+      seasonNumber: data.season_number,
+      premiereDate: data.air_date ?? null,
+      endDate: null,
+      episodeOrder: episodes.length,
+      imageURL: data.poster_path
+        ? `${this.imageBase}w500${data.poster_path}`
+        : null,
+      episodes,
+    };
+  }
+
   // ── Find by External ID (for ID mapping) ────────────────────
 
   async findByImdbId(
@@ -1041,6 +1281,35 @@ export class SeeryTMDBService {
   }
 
   // ── Mapper ──────────────────────────────────────────────────
+
+  /**
+   * Maps a TMDB search result to the shared SeerySeriesSummary shape
+   * (same as TVmaze's mapShow output) so hybrid search results are uniform.
+   */
+  private mapTMDBToSeerySummary(r: TMDBTVResult): SeerySeriesSummary {
+    return {
+      id: r.id,
+      name: r.name ?? r.original_name ?? "",
+      overview: r.overview ?? "",
+      posterURL: r.poster_path
+        ? `${this.imageBase}w500${r.poster_path}`
+        : null,
+      backdropURL: r.backdrop_path
+        ? `${this.imageBase}w780${r.backdrop_path}`
+        : null,
+      firstAirDate: r.first_air_date ?? null,
+      genres: [],
+      language: r.origin_country?.[0] ?? null,
+      type: null,
+      status: null,
+      rating: r.vote_average ?? null,
+      runtime: null,
+      averageRuntime: null,
+      network: null,
+      webChannel: null,
+      provider: "tmdb",
+    };
+  }
 
   private mapTMDBSeries(r: TMDBTVResult): SeeryTMDBSeriesSummary {
     return {
@@ -1384,4 +1653,145 @@ interface TMDBReview {
   content: string;
   created_at: string;
   url?: string;
+}
+
+// ─── TMDB Detailed Types (for full series details) ──────────────
+
+interface TMDBTVDetails {
+  id: number;
+  name: string;
+  original_name?: string;
+  overview?: string;
+  type?: string;
+  status?: string;
+  first_air_date?: string | null;
+  last_air_date?: string | null;
+  homepage?: string | null;
+  in_production?: boolean;
+  languages?: string[];
+  original_language?: string;
+  number_of_episodes?: number;
+  number_of_seasons?: number;
+  episode_run_time?: number[];
+  genres?: TMDBGenre[];
+  vote_average?: number;
+  vote_count?: number;
+  popularity?: number;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  networks?: TMDBNetwork[];
+  production_companies?: TMDBNetwork[];
+  seasons?: TMDBSeasonSummary[];
+  aggregate_credits?: {
+    cast?: TMDBAggregateCast[];
+    crew?: TMDBAggregateCrew[];
+  };
+  external_ids?: {
+    imdb_id?: string | null;
+    tvdb_id?: number | null;
+    tvrage_id?: number | null;
+  };
+  images?: {
+    backdrops?: TMDBImage[];
+    posters?: TMDBImage[];
+    logos?: TMDBImage[];
+  };
+  next_episode_to_air?: TMDBEpisodeBrief | null;
+  last_episode_to_air?: TMDBEpisodeBrief | null;
+}
+
+interface TMDBNetwork {
+  id: number;
+  name: string;
+  logo_path?: string | null;
+  origin_country?: string;
+}
+
+interface TMDBSeasonSummary {
+  id: number;
+  name?: string;
+  overview?: string;
+  season_number: number;
+  episode_count?: number;
+  air_date?: string | null;
+  poster_path?: string | null;
+  vote_average?: number;
+}
+
+interface TMDBAggregateCast {
+  id: number;
+  name: string;
+  original_name?: string;
+  profile_path?: string | null;
+  gender?: number;
+  known_for_department?: string;
+  roles?: {
+    credit_id: string;
+    character: string;
+    episode_count: number;
+  }[];
+  total_episode_count?: number;
+  order?: number;
+}
+
+interface TMDBAggregateCrew {
+  id: number;
+  name: string;
+  original_name?: string;
+  profile_path?: string | null;
+  gender?: number;
+  known_for_department?: string;
+  jobs?: {
+    credit_id: string;
+    job: string;
+    episode_count: number;
+  }[];
+  department?: string;
+  total_episode_count?: number;
+}
+
+interface TMDBImage {
+  aspect_ratio?: number;
+  file_path: string;
+  height?: number;
+  width?: number;
+  vote_average?: number;
+  vote_count?: number;
+}
+
+interface TMDBEpisodeBrief {
+  id: number;
+  name?: string;
+  overview?: string;
+  air_date?: string | null;
+  episode_number?: number;
+  season_number?: number;
+  runtime?: number | null;
+  still_path?: string | null;
+  vote_average?: number;
+}
+
+interface TMDBSeasonDetails {
+  id: number;
+  name?: string;
+  overview?: string;
+  season_number: number;
+  air_date?: string | null;
+  poster_path?: string | null;
+  episodes?: TMDBEpisodeDetails[];
+}
+
+interface TMDBEpisodeDetails {
+  id: number;
+  name: string;
+  overview?: string;
+  air_date?: string | null;
+  episode_number: number;
+  season_number: number;
+  runtime?: number | null;
+  still_path?: string | null;
+  vote_average?: number;
+  production_code?: string;
+  crew?: { id: number; name: string; job: string; profile_path?: string | null }[];
+  guest_stars?: { id: number; name: string; character: string; profile_path?: string | null }[];
 }

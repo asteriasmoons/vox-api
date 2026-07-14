@@ -399,6 +399,108 @@ router.get(
 );
 
 // ═══════════════════════════════════════════════════════════════════
+// Hybrid Search + TMDB Detail Routes
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/seery/search/hybrid?query=severance
+ * Searches both TVmaze and TMDB, merges results with deduplication.
+ * TVmaze results are preferred when both providers have the same show.
+ */
+router.get("/search/hybrid", async (req: Request, res: Response) => {
+  try {
+    const query = readRequiredString(req.query.query, "query");
+
+    const emptyPaged = {
+      page: 1,
+      totalPages: 0,
+      totalResults: 0,
+      results: [] as import("../services/seery.service").SeerySeriesSummary[],
+    };
+
+    // Fire both searches in parallel
+    const [tvmazeResults, tmdbResults] = await Promise.all([
+      seeryService.searchSeries(query).catch(() => emptyPaged),
+      tmdbService.searchTV(query).catch(() => emptyPaged),
+    ]);
+
+    // Build a set of normalized keys from TVmaze results for dedup
+    const tvmazeKeys = new Set<string>();
+    for (const show of tvmazeResults.results) {
+      tvmazeKeys.add(normalizeForDedup(show.name, show.firstAirDate));
+    }
+
+    // Filter TMDB results to only those not already in TVmaze
+    const uniqueTMDB = tmdbResults.results.filter(
+      (show) => !tvmazeKeys.has(normalizeForDedup(show.name, show.firstAirDate))
+    );
+
+    // TVmaze first, then unique TMDB results
+    const merged = [...tvmazeResults.results, ...uniqueTMDB];
+
+    res.status(200).json({ success: true, data: merged });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/**
+ * GET /api/seery/tmdb/series/:seriesId
+ * Full series details from TMDB (same shape as TVmaze /series/:showId).
+ */
+router.get(
+  "/tmdb/series/:seriesId",
+  async (req: Request, res: Response) => {
+    try {
+      const tmdbId = readId(req.params.seriesId, "seriesId");
+      const data = await tmdbService.getSeriesDetails(tmdbId);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/tmdb/series/:seriesId/season/:seasonNumber
+ * Season episodes from TMDB (same shape as TVmaze season episodes).
+ */
+router.get(
+  "/tmdb/series/:seriesId/season/:seasonNumber",
+  async (req: Request, res: Response) => {
+    try {
+      const tmdbId = readId(req.params.seriesId, "seriesId");
+      const seasonNumber = readNonNegativeInteger(
+        req.params.seasonNumber,
+        "seasonNumber"
+      );
+      const data = await tmdbService.getSeasonEpisodes(tmdbId, seasonNumber);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+/**
+ * GET /api/seery/tmdb/series/:seriesId/reviews?page=1
+ * Reviews for a TMDB series by its TMDB ID.
+ */
+router.get(
+  "/tmdb/series/:seriesId/reviews",
+  async (req: Request, res: Response) => {
+    try {
+      const tmdbId = readId(req.params.seriesId, "seriesId");
+      const page = readOptionalPositiveInt(req.query.page) ?? 1;
+      const data = await tmdbService.reviews(tmdbId, page);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════
 // ID Mapping Routes
 // ═══════════════════════════════════════════════════════════════════
 
@@ -552,6 +654,23 @@ function readRouteParameter(value: unknown, field: string): string {
     "SEERY_INVALID_REQUEST",
     `${field} is required and must be a single value.`
   );
+}
+
+/**
+ * Normalizes a show name + premiere year for deduplication.
+ * e.g. "The Bear" + "2022-06-23" → "the bear|2022"
+ */
+function normalizeForDedup(
+  name: string,
+  firstAirDate: string | null
+): string {
+  const normalized = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const year = firstAirDate?.slice(0, 4) ?? "unknown";
+  return `${normalized}|${year}`;
 }
 
 export default router;
