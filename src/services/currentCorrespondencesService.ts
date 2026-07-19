@@ -1,5 +1,5 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const DEFAULT_GROQ_MODEL = "moonshotai/kimi-k2-instruct-0905";
+const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 
 type GroqChatCompletionResponse = {
   choices?: Array<{
