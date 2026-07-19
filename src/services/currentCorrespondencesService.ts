@@ -143,8 +143,9 @@ herbs, colors, or elements as scientific or medical facts.
 - Do not claim supernatural certainty.
 
 ABOUT THE CORRESPONDENCES:
-- The planet must match the supplied planetary day unless another supplied context makes
-the current planetary hour clearly more relevant.
+- The planet field must exactly match the supplied planetary day.
+- Do not use the current planetary hour, next planetary hour, moon sign, sabbat, color,
+crystal, or herb to choose a different planet.
 - The element, color, crystal, and herb must feel coherent with the selected planet and
 the supplied moon or sabbat context.
 - Prefer common, recognizable correspondences over obscure choices.
@@ -182,14 +183,37 @@ Output shape:
 {
   "title": "Today's energies",
   "message": "1 to 2 grounded sentences.",
-  "planet": "Venus",
-  "element": "Water",
-  "color": "Green",
-  "crystal": "Rose Quartz",
-  "herb": "Rose",
-  "keywords": ["harmony", "beauty", "connection", "softness"]
+  "planet": "${input.planetaryDay}",
+  "element": "Fire",
+  "color": "Gold",
+  "crystal": "Citrine",
+  "herb": "Calendula",
+  "keywords": ["clarity", "warmth", "focus", "vitality"]
 }
 `;
+}
+
+function normalizePlanetName(value: string): string {
+  const normalized = value.trim().toLowerCase();
+
+  switch (normalized) {
+    case "sun":
+      return "Sun";
+    case "moon":
+      return "Moon";
+    case "mars":
+      return "Mars";
+    case "mercury":
+      return "Mercury";
+    case "jupiter":
+      return "Jupiter";
+    case "venus":
+      return "Venus";
+    case "saturn":
+      return "Saturn";
+    default:
+      return value.trim();
+  }
 }
 
 export async function generateCurrentCorrespondences(
@@ -214,10 +238,19 @@ export async function generateCurrentCorrespondences(
     throw new Error(`AI returned too few valid keywords: ${raw}`);
   }
 
+  const planet = normalizePlanetName(input.planetaryDay);
+
+  if (parsed.planet.trim().toLowerCase() !== planet.toLowerCase()) {
+    console.warn("[current-correspondences] overriding AI planet mismatch", {
+      requestedPlanetaryDay: planet,
+      aiPlanet: parsed.planet.trim(),
+    });
+  }
+
   return {
     title: parsed.title.trim(),
     message: parsed.message.trim(),
-    planet: parsed.planet.trim(),
+    planet,
     element: parsed.element.trim(),
     color: parsed.color.trim(),
     crystal: parsed.crystal.trim(),
