@@ -174,6 +174,41 @@ function formatProfile(profile: RecommendationProfile): string {
   ].join("\n");
 }
 
+function formatReaderContext(request: RecommendationRequest): string {
+  const context = request.readerContext;
+  if (!context) return "No reader-library context supplied.";
+
+  return [
+    "Reader-library context:",
+    context.favoriteGenres?.length
+      ? `Favorite genres: ${context.favoriteGenres.slice(0, 10).join(", ")}`
+      : "",
+    context.favoriteAuthors?.length
+      ? `Favorite authors: ${context.favoriteAuthors.slice(0, 10).join(", ")}`
+      : "",
+    context.favoriteTropes?.length
+      ? `Favorite tropes: ${context.favoriteTropes.slice(0, 10).join(", ")}`
+      : "",
+    context.favoriteMoods?.length
+      ? `Favorite moods: ${context.favoriteMoods.slice(0, 10).join(", ")}`
+      : "",
+    context.favoriteTags?.length
+      ? `Favorite tags: ${context.favoriteTags.slice(0, 12).join(", ")}`
+      : "",
+    context.ratings?.length
+      ? `Rated books: ${context.ratings
+          .slice(0, 20)
+          .map((rating) => `${rating.title}${rating.author ? ` by ${rating.author}` : ""} (${rating.rating}/5)`)
+          .join("; ")}`
+      : "",
+    context.pagePreferences
+      ? `Preferred page range: ${context.pagePreferences.preferredMinPages ?? "?"}-${context.pagePreferences.preferredMaxPages ?? "?"}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -368,15 +403,24 @@ function parseCandidateGroups(raw: string): CandidateGroup[] {
           const author = cleanText(item.author);
           const summary = cleanText(item.summary);
           const rationale = cleanText(item.rationale);
+          const genres = cleanList(item.genres, 4);
+          const moods = cleanList(item.moods, 4);
+          const tropes = cleanList(item.tropes, 5);
+          const themes = cleanList(item.themes, 5);
 
           if (!title) return null;
 
           return {
             title,
             strategy,
+            strategyLabel: cleanText(record.label) || strategy.replace(/_/g, " "),
             ...(author ? { author } : {}),
             ...(summary ? { summary } : {}),
             ...(rationale ? { rationale } : {}),
+            ...(genres.length > 0 ? { genres } : {}),
+            ...(moods.length > 0 ? { moods } : {}),
+            ...(tropes.length > 0 ? { tropes } : {}),
+            ...(themes.length > 0 ? { themes } : {}),
           };
         })
         .filter((book): book is AiBookCandidate => Boolean(book));
@@ -460,6 +504,8 @@ ${seedContext}
 Request intent:
 ${JSON.stringify(input.intent, null, 2)}
 
+${formatReaderContext(input.request)}
+
 This profile may later power Books Like This, Homepage For You, Discover shelves, browse categories, and similar-book pages. Capture the durable reading qualities, not a one-off route response.
 
 Return JSON only with this exact shape:
@@ -510,6 +556,8 @@ ${seedContext}
 Recommendation profile:
 ${formatProfile(input.profile)}
 
+${formatReaderContext(input.request)}
+
 Generate multiple candidate groups. Each group should contain real, verifiable books.
 
 Strategies:
@@ -528,7 +576,8 @@ Rules:
 - For author requests, include books by the author and compatible adjacent authors when useful.
 - For genre/subgenre/trope/theme/mood requests, recommend books that strongly express that quality.
 - Publication year is not a filter. Include old books when they fit.
-- Return title and author only unless a short rationale helps explain the strategy.
+- Include concise structured genres, moods, tropes, and themes for each book so the app can save useful metadata.
+- Do not copy raw catalog categories. Use reader-facing labels.
 
 Return JSON only:
 {
@@ -536,7 +585,17 @@ Return JSON only:
     {
       "strategy": "closest_match",
       "label": "Closest Match",
-      "books": [{"title":"Book Title","author":"Author Name","rationale":"brief optional reason"}]
+      "books": [
+        {
+          "title":"Book Title",
+          "author":"Author Name",
+          "rationale":"brief optional reason",
+          "genres":["Fantasy"],
+          "moods":["Cozy"],
+          "tropes":["Found family"],
+          "themes":["Belonging"]
+        }
+      ]
     }
   ]
 }
@@ -567,6 +626,8 @@ ${formatSeedContext(input.seedBook, input.intent.normalizedQuery || input.reques
 Recommendation profile:
 ${formatProfile(input.profile)}
 
+${formatReaderContext(input.request)}
+
 Already tried or excluded titles:
 ${input.excludedTitles.slice(0, 80).join("\n") || "none"}
 
@@ -580,7 +641,17 @@ Return JSON only:
     {
       "strategy": "closest_match",
       "label": "Fallback Closest Match",
-      "books": [{"title":"Book Title","author":"Author Name","rationale":"brief optional reason"}]
+      "books": [
+        {
+          "title":"Book Title",
+          "author":"Author Name",
+          "rationale":"brief optional reason",
+          "genres":["Fantasy"],
+          "moods":["Cozy"],
+          "tropes":["Found family"],
+          "themes":["Belonging"]
+        }
+      ]
     }
   ]
 }

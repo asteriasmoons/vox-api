@@ -125,7 +125,12 @@ export type AiBookCandidate = {
   author?: string;
   summary?: string;
   strategy: RecommendationStrategy;
+  strategyLabel?: string;
   rationale?: string;
+  genres?: string[];
+  moods?: string[];
+  tropes?: string[];
+  themes?: string[];
 };
 
 export type CandidateGroup = {
@@ -149,8 +154,13 @@ export type CatalogBookMetadata = {
 
 export type VerifiedRecommendationCandidate = CatalogBookMetadata & {
   strategy: RecommendationStrategy;
+  strategyLabel?: string;
   candidateRank: number;
   rationale?: string;
+  genres: string[];
+  moods: string[];
+  tropes: string[];
+  themes: string[];
 };
 
 export type RecommendationResult = {
@@ -162,8 +172,14 @@ export type RecommendationResult = {
   releaseYear?: number;
   rating?: number;
   tags?: string[];
+  genres?: string[];
+  moods?: string[];
+  tropes?: string[];
+  themes?: string[];
   source?: RecommendationSource;
   strategy?: RecommendationStrategy;
+  strategyLabel?: string;
+  rationale?: string;
   matchScore: number;
   metadataScore: number;
   finalScore: number;

@@ -108,6 +108,10 @@ function metadataScore(candidate: VerifiedRecommendationCandidate): number {
   if (candidate.pages !== undefined) score += 7;
   if (candidate.releaseYear !== undefined) score += 7;
   if (candidate.rating !== undefined) score += Math.min(candidate.rating * 3, 15);
+  if (candidate.genres.length > 0) score += 4;
+  if (candidate.moods.length > 0) score += 3;
+  if (candidate.tropes.length > 0) score += 3;
+  if (candidate.themes.length > 0) score += 3;
   if (candidate.source === "Open Library + Google Books") score += 12;
   else score += 6;
 
@@ -180,8 +184,14 @@ function toResult(score: IntermediateScore): RecommendationResult {
     ...(score.releaseYear !== undefined ? { releaseYear: score.releaseYear } : {}),
     ...(score.rating !== undefined ? { rating: score.rating } : {}),
     ...(score.tags.length > 0 ? { tags: score.tags } : {}),
+    ...(score.genres.length > 0 ? { genres: score.genres } : {}),
+    ...(score.moods.length > 0 ? { moods: score.moods } : {}),
+    ...(score.tropes.length > 0 ? { tropes: score.tropes } : {}),
+    ...(score.themes.length > 0 ? { themes: score.themes } : {}),
     ...(score.source ? { source: score.source } : {}),
     ...(score.strategy ? { strategy: score.strategy } : {}),
+    ...(score.strategyLabel ? { strategyLabel: score.strategyLabel } : {}),
+    ...(score.rationale ? { rationale: score.rationale } : {}),
   };
 }
 
@@ -251,21 +261,40 @@ export const recommendationScoringService = {
   scoreRecommendations(input: ScoreInput): RecommendationResult[] {
     const scored = input.candidates
       .map((candidate) => {
+        const enrichedCandidate: VerifiedRecommendationCandidate = {
+          ...candidate,
+          genres:
+            candidate.genres.length > 0
+              ? candidate.genres
+              : [input.profile.genre].filter(Boolean),
+          moods:
+            candidate.moods.length > 0
+              ? candidate.moods
+              : input.profile.moods.slice(0, 3),
+          tropes:
+            candidate.tropes.length > 0
+              ? candidate.tropes
+              : input.profile.keyTropes.slice(0, 4),
+          themes:
+            candidate.themes.length > 0
+              ? candidate.themes
+              : input.profile.themes.slice(0, 4),
+        };
         const candidateMatchScore = matchScore(
-          candidate,
+          enrichedCandidate,
           input.profile,
           input.seedBook,
         );
-        const candidateMetadataScore = metadataScore(candidate);
+        const candidateMetadataScore = metadataScore(enrichedCandidate);
         const finalScore =
           candidateMatchScore * 0.68 + candidateMetadataScore * 0.32;
 
         return {
-          ...candidate,
+          ...enrichedCandidate,
           matchScore: candidateMatchScore,
           metadataScore: candidateMetadataScore,
           finalScore,
-          seriesKey: seriesKey(candidate),
+          seriesKey: seriesKey(enrichedCandidate),
         };
       })
       .filter((candidate) => candidate.finalScore > 0)

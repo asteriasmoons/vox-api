@@ -593,6 +593,11 @@ export const bookCatalogService = {
           ...metadata,
           strategy: candidate.strategy,
           candidateRank: index,
+          genres: candidate.genres ?? [],
+          moods: candidate.moods ?? [],
+          tropes: candidate.tropes ?? [],
+          themes: candidate.themes ?? [],
+          ...(candidate.strategyLabel ? { strategyLabel: candidate.strategyLabel } : {}),
           ...(candidate.rationale ? { rationale: candidate.rationale } : {}),
         };
       },
