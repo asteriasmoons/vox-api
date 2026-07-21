@@ -34,6 +34,16 @@ const challengeSubmissionSchema = new mongoose.Schema(
 
     approvedDate: Date,
 
+    cycleID: {
+      type: String,
+      default: "",
+      index: true,
+      trim: true,
+    },
+
+    cycleStartDate: Date,
+    cycleEndDate: Date,
+
     postedToFeed: {
       type: Boolean,
       default: false,
@@ -60,6 +70,13 @@ const challengeSubmissionSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+challengeSubmissionSchema.index({
+  challengeID: 1,
+  userID: 1,
+  cycleID: 1,
+  validationStatus: 1,
+});
 
 export const LumeyChallengeSubmission =
   lumeyDB.models.LumeyChallengeSubmission ||

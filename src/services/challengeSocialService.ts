@@ -77,6 +77,15 @@ export async function createSubmission(input: any) {
   if (!input.userID) throw new Error("userID is required.");
 
   const validationStatus = cleanString(input.validationStatus) || "submitted";
+  const cycleID = cleanString(input.cycleID);
+
+  if (validationStatus === "approved") {
+    await ensureNoApprovedSubmissionForCycle({
+      challengeID: String(input.challengeID),
+      userID: String(input.userID),
+      cycleID,
+    });
+  }
 
   const submission = await LumeyChallengeSubmission.create({
     challengeID: input.challengeID,
@@ -95,6 +104,9 @@ export async function createSubmission(input: any) {
       ? new Date(input.submittedDate)
       : new Date(),
     approvedDate: input.approvedDate ? new Date(input.approvedDate) : undefined,
+    cycleID,
+    cycleStartDate: parseOptionalDate(input.cycleStartDate),
+    cycleEndDate: parseOptionalDate(input.cycleEndDate),
     postedToFeed: false,
     feedItemID: null,
     likeCount: 0,
@@ -127,6 +139,13 @@ export async function approveSubmissionAndPostToFeed(input: {
   const submission = await LumeyChallengeSubmission.findById(input.submissionID);
   if (!submission) throw new Error("Submission not found.");
 
+  await ensureNoApprovedSubmissionForCycle({
+    challengeID: String(submission.challengeID),
+    userID: String(submission.userID),
+    cycleID: cleanString(submission.cycleID),
+    excludeSubmissionID: String(submission._id),
+  });
+
   submission.validationStatus = "approved";
   submission.validationMessage = cleanString(input.validationMessage) || submission.validationMessage;
   submission.approvedDate = new Date();
@@ -150,6 +169,9 @@ export async function approveSubmissionAndPostToFeed(input: {
     username: submission.username,
     challengeID: submission.challengeID,
     challengeTitle: cleanString(input.challengeTitle),
+    cycleID: submission.cycleID,
+    cycleStartDate: submission.cycleStartDate,
+    cycleEndDate: submission.cycleEndDate,
     text:
       submission.submissionNote ||
       formatProofSummaryForFeed(submission.proofSummary) ||
@@ -632,6 +654,39 @@ export async function deleteAnnouncement(announcementID: string) {
 function cleanString(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.trim();
+}
+
+function parseOptionalDate(value: unknown): Date | undefined {
+  if (!value) return undefined;
+
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date;
+}
+
+async function ensureNoApprovedSubmissionForCycle(input: {
+  challengeID: string;
+  userID: string;
+  cycleID: string;
+  excludeSubmissionID?: string;
+}) {
+  if (!input.cycleID) return;
+
+  const query: any = {
+    challengeID: input.challengeID,
+    userID: input.userID,
+    cycleID: input.cycleID,
+    validationStatus: "approved",
+  };
+
+  if (input.excludeSubmissionID) {
+    query._id = { $ne: input.excludeSubmissionID };
+  }
+
+  const existingApprovedSubmission = await LumeyChallengeSubmission.findOne(query).lean();
+  if (existingApprovedSubmission) {
+    throw new Error("This challenge has already been approved for the current cycle.");
+  }
 }
 
 function formatProofSummaryForFeed(value: unknown): string {

@@ -53,6 +53,16 @@ const challengeFeedItemSchema = new mongoose.Schema(
       trim: true,
     },
 
+    cycleID: {
+      type: String,
+      default: "",
+      index: true,
+      trim: true,
+    },
+
+    cycleStartDate: Date,
+    cycleEndDate: Date,
+
     // Used by both approved submissions and normal user posts
     text: {
       type: String,
