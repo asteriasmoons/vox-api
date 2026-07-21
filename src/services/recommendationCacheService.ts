@@ -17,12 +17,15 @@ const SEED_TTL_MS = 1000 * 60 * 60 * 24;
 const PROFILE_TTL_MS = 1000 * 60 * 60 * 12;
 const CATALOG_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const FINAL_RESPONSE_TTL_MS = 1000 * 60 * 60 * 3;
+const GENERATED_DESCRIPTION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const FINAL_RESPONSE_CACHE_VERSION = "generated-descriptions-v1";
 
 const seedBooks = new Map<string, CacheEntry<SeedBook | null>>();
 const requestIntents = new Map<string, CacheEntry<RecommendationIntent>>();
 const requestProfiles = new Map<string, CacheEntry<RecommendationProfile>>();
 const catalogLookups = new Map<string, CacheEntry<CatalogBookMetadata | null>>();
 const finalResponses = new Map<string, CacheEntry<RecommendationEngineResponse>>();
+const generatedDescriptions = new Map<string, CacheEntry<string>>();
 
 function now(): number {
   return Date.now();
@@ -96,6 +99,7 @@ export function makeRequestCacheKey(request: RecommendationRequest): string {
     : "";
 
   return [
+    FINAL_RESPONSE_CACHE_VERSION,
     request.surface,
     normalizeCacheText(request.query),
     request.desiredCount,
@@ -151,5 +155,18 @@ export const recommendationCacheService = {
 
   setFinalResponse(key: string, value: RecommendationEngineResponse): void {
     set(finalResponses, key, value, FINAL_RESPONSE_TTL_MS);
+  },
+
+  getGeneratedDescription(title: string, author = ""): string | null {
+    return get(generatedDescriptions, normalizeBookKey(title, author));
+  },
+
+  setGeneratedDescription(title: string, author: string, value: string): void {
+    set(
+      generatedDescriptions,
+      normalizeBookKey(title, author),
+      value,
+      GENERATED_DESCRIPTION_TTL_MS,
+    );
   },
 };

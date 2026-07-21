@@ -1,4 +1,5 @@
 import { recommendationCacheService } from "./recommendationCacheService";
+import { recommendationGroqModel } from "./groqModelConfig";
 import type {
   AiBookCandidate,
   CandidateGroup,
@@ -16,10 +17,6 @@ import {
 
 const GROQ_CHAT_COMPLETIONS_URL =
   "https://api.groq.com/openai/v1/chat/completions";
-const RECOMMENDATION_GROQ_MODEL =
-  process.env.RECOMMENDATION_GROQ_MODEL ||
-  process.env.GROQ_RECOMMENDATION_MODEL ||
-  "llama-3.3-70b-versatile";
 
 const ANALYZE_TEMPERATURE = 0.15;
 const PROFILE_TEMPERATURE = 0.2;
@@ -240,7 +237,7 @@ async function groqChatJson(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: RECOMMENDATION_GROQ_MODEL,
+          model: recommendationGroqModel(),
           temperature: options.temperature,
           max_tokens: options.maxTokens,
           response_format: { type: "json_object" },

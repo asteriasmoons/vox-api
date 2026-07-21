@@ -466,10 +466,7 @@ function mergeCatalogResults(
   return {
     title,
     author,
-    summary:
-      cleanText(googleBooks?.summary) ||
-      cleanText(candidate.summary) ||
-      "No description available.",
+    summary: cleanText(googleBooks?.summary) || cleanText(candidate.summary),
     tags,
     source,
     catalogScore,

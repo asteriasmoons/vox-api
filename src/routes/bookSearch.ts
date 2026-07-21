@@ -1,13 +1,10 @@
 import { Router } from "express";
+import { bookDescriptionAIService } from "../services/bookDescriptionAIService";
 
 const router = Router();
 
 const OPEN_LIBRARY_SEARCH_URL = "https://openlibrary.org/search.json";
 const GOOGLE_BOOKS_SEARCH_URL = "https://www.googleapis.com/books/v1/volumes";
-const GROQ_CHAT_COMPLETIONS_URL =
-  "https://api.groq.com/openai/v1/chat/completions";
-
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 type BookSearchResult = {
   title: string;
@@ -60,14 +57,6 @@ type GoogleVolumeInfo = {
 type GoogleBooksResponse = {
   items?: Array<{
     volumeInfo?: GoogleVolumeInfo;
-  }>;
-};
-
-type GroqResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
   }>;
 };
 
@@ -126,43 +115,6 @@ async function fetchJson<T>(url: URL): Promise<T> {
   }
 
   return json as T;
-}
-
-async function generateFallbackSummary(
-  title: string,
-  author: string,
-): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY || "";
-  if (!apiKey || !title) return "";
-
-  const response = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      temperature: 0.4,
-      max_tokens: 220,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Write short, accurate book summaries only. Do not invent specific plot details if unsure.",
-        },
-        {
-          role: "user",
-          content: `Write a concise 2-3 sentence summary for the book "${title}" by "${author}".`,
-        },
-      ],
-    }),
-  });
-
-  const json = (await response.json().catch(() => null)) as GroqResponse | null;
-  if (!response.ok) return "";
-
-  return cleanText(json?.choices?.[0]?.message?.content);
 }
 
 async function searchOpenLibrary(query: string): Promise<BookSearchResult[]> {
@@ -323,21 +275,8 @@ router.post("/", async (req, res) => {
       ...openLibraryResults,
     ]).slice(0, 12);
 
-    const resultsWithSummaries = await Promise.all(
-      mergedResults.map(async (book) => {
-        if (book.summary) return book;
-
-        const fallbackSummary = await generateFallbackSummary(
-          book.title,
-          book.author,
-        );
-
-        return {
-          ...book,
-          summary: fallbackSummary || "No summary available.",
-        };
-      }),
-    );
+    const resultsWithSummaries =
+      await bookDescriptionAIService.ensureDescriptions(mergedResults);
 
     return res.json({ books: resultsWithSummaries });
   } catch (error) {

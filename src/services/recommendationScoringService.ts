@@ -1,4 +1,5 @@
 import { normalizeBookKey } from "./recommendationCacheService";
+import { hasUsableBookDescription } from "./bookDescriptionAIService";
 import type {
   RecommendationProfile,
   RecommendationRequest,
@@ -100,7 +101,7 @@ function publicationPreferenceScore(
 function metadataScore(candidate: VerifiedRecommendationCandidate): number {
   let score = 25;
 
-  if (candidate.summary && candidate.summary !== "No description available.") {
+  if (hasUsableBookDescription(candidate.summary)) {
     score += 18;
   }
   if (candidate.coverUrl) score += 14;

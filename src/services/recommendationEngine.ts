@@ -1,5 +1,6 @@
 import { recommendationAIService } from "./recommendationAIService";
 import { bookCatalogService } from "./bookCatalogService";
+import { bookDescriptionAIService } from "./bookDescriptionAIService";
 import {
   makeRequestCacheKey,
   normalizeBookKey,
@@ -125,12 +126,22 @@ export async function buildRecommendations(
   if (cached) return cached;
 
   const intent = await recommendationAIService.analyzeRequest(request);
-  const seedBook =
+  const resolvedSeedBook =
     request.seedBook ??
     (await bookCatalogService.resolveSeedBook(
       intent.normalizedQuery || request.query,
       intent.requestType,
     ));
+  const seedBook = resolvedSeedBook
+    ? {
+        ...resolvedSeedBook,
+        description: await bookDescriptionAIService.ensureDescription({
+          title: resolvedSeedBook.title,
+          author: resolvedSeedBook.author,
+          summary: resolvedSeedBook.description,
+        }),
+      }
+    : null;
   const profile = await recommendationAIService.analyzeSeedBook({
     request,
     intent,
@@ -183,12 +194,14 @@ export async function buildRecommendations(
     seenVerified.add(key);
     return true;
   });
+  const describedVerified =
+    await bookDescriptionAIService.ensureDescriptions(dedupedVerified);
 
   const recs = recommendationScoringService.scoreRecommendations({
     request,
     profile,
     seedBook,
-    candidates: dedupedVerified,
+    candidates: describedVerified,
   });
 
   const response: RecommendationEngineResponse = {
