@@ -7,6 +7,7 @@ import { Server as SocketIOServer } from "socket.io";
 
 import summaryRoute from "./routes/summary";
 import recsRoute from "./routes/recs";
+import recommendationCollectionsRoute from "./routes/recommendationCollections";
 import journalRoutes from "./routes/journal";
 import astrologyRoutes from "./routes/astrology";
 import { createBuddyRouter } from "./routes/buddy-routes";
@@ -54,6 +55,7 @@ app.get("/", (_req, res) => {
 
 app.use("/api/books/summary", summaryRoute);
 app.use("/api/books/recs", recsRoute);
+app.use("/api/books/recommendation-collections", recommendationCollectionsRoute);
 app.use("/api/journal", journalRoutes);
 app.use("/api/astrology", astrologyRoutes);
 app.use("/api/buddy", createBuddyRouter(io));
