@@ -29,6 +29,7 @@ import tinyNudgeRoutes from "./routes/tinyNudgeRoutes";
 import moonRouter from "./routes/moon";
 import seeryRoutes from "./routes/seery.routes";
 import journalInsightsRoutes from "./routes/journalInsights";
+import musicLookupRoutes from "./routes/musicLookup";
 
 import path from "path";
 dotenv.config();
@@ -74,6 +75,7 @@ app.use("/api/tiny-nudge", tinyNudgeRoutes);
 app.use("/api/moon", moonRouter);
 app.use("/api/seery", seeryRoutes);
 app.use("/api/journal/insights", journalInsightsRoutes);
+app.use("/api/music", musicLookupRoutes);
 
 io.on("connection", (socket) => {
   socket.on("buddy:join_room", (groupId: string) => {
