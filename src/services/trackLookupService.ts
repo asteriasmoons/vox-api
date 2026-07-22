@@ -371,11 +371,14 @@ async function fetchDiscogsMaster(
   const primaryImage = data.images?.find((img) => img.type === "primary");
   const albumArtUrl = primaryImage?.uri ?? data.images?.[0]?.uri;
 
-  return {
+  const result: { genres: string[]; albumArtUrl?: string; year?: number } = {
     genres,
-    albumArtUrl: albumArtUrl ?? undefined,
-    year: data.year ?? undefined,
   };
+
+  if (albumArtUrl) result.albumArtUrl = albumArtUrl;
+  if (data.year != null) result.year = data.year;
+
+  return result;
 }
 
 async function fetchDiscogsArtist(
@@ -394,7 +397,8 @@ async function fetchDiscogsArtist(
     .replace(/\[a=([^\]]+)\]/g, "$1")
     .replace(/\[([^\]]+)\]/g, "$1");
 
-  return { profile: profile || undefined };
+  if (profile) return { profile };
+  return {};
 }
 
 // ── Public API ──
@@ -445,17 +449,27 @@ function mergeResults(
     new Set([...primary.similarArtists, ...secondary.similarArtists]),
   ).slice(0, 8);
 
-  return {
+  const result: TrackMetadataResult = {
     title: primary.title || secondary.title,
     artist: primary.artist || secondary.artist,
-    albumTitle: primary.albumTitle || secondary.albumTitle,
     genres: mergedGenres,
-    releaseDate: primary.releaseDate || secondary.releaseDate,
-    albumArtUrl: primary.albumArtUrl || secondary.albumArtUrl,
-    artistBio: primary.artistBio || secondary.artistBio,
     similarArtists: mergedSimilar,
-    label: primary.label || secondary.label,
-    duration: primary.duration || secondary.duration,
     source: "MusicBrainz + Discogs",
   };
+
+  const albumTitle = primary.albumTitle || secondary.albumTitle;
+  const releaseDate = primary.releaseDate || secondary.releaseDate;
+  const albumArtUrl = primary.albumArtUrl || secondary.albumArtUrl;
+  const artistBio = primary.artistBio || secondary.artistBio;
+  const label = primary.label || secondary.label;
+  const duration = primary.duration || secondary.duration;
+
+  if (albumTitle) result.albumTitle = albumTitle;
+  if (releaseDate) result.releaseDate = releaseDate;
+  if (albumArtUrl) result.albumArtUrl = albumArtUrl;
+  if (artistBio) result.artistBio = artistBio;
+  if (label) result.label = label;
+  if (duration) result.duration = duration;
+
+  return result;
 }
