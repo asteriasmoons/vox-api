@@ -39,6 +39,22 @@ function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeIdentityText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function normalizedTitleAuthorKey(title: string, author = ""): string {
+  return `${normalizeIdentityText(title)}|${normalizeIdentityText(author)}`;
+}
+
+function bookIdentityKey(title: string, author = ""): string {
+  return `book:${normalizeIdentityText(title)}:${normalizeIdentityText(author)}`;
+}
+
 function clampCount(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(Math.floor(value), MAX_RESULT_COUNT));
@@ -94,15 +110,41 @@ function removeSeedAndExcludedCandidates(
   seedBook: SeedBook | null,
   request: RecommendationRequest,
 ): AiBookCandidate[] {
-  const excludedKeys = new Set(request.excludeBookKeys ?? []);
+  const excludedKeys = new Set<string>();
+  const addExcludedKey = (key: string) => {
+    excludedKeys.add(key);
+    if (key.includes("|")) {
+      const [title = "", author = ""] = key.split("|");
+      excludedKeys.add(normalizedTitleAuthorKey(title, author));
+      excludedKeys.add(bookIdentityKey(title, author));
+    }
+  };
+
+  [
+    ...(request.excludeBookKeys ?? []),
+    ...(request.readerContext?.libraryBookKeys ?? []),
+    ...(request.readerContext?.finishedBookKeys ?? []),
+    ...(request.readerContext?.currentlyReadingBookKeys ?? []),
+    ...(request.readerContext?.dismissedBookKeys ?? []),
+    ...(request.readerContext?.alreadyRecommendedBookKeys ?? []),
+  ].forEach(addExcludedKey);
+
   if (seedBook) {
-    excludedKeys.add(normalizeBookKey(seedBook.title, seedBook.author));
+    addExcludedKey(normalizeBookKey(seedBook.title, seedBook.author));
+    addExcludedKey(normalizedTitleAuthorKey(seedBook.title, seedBook.author));
+    addExcludedKey(bookIdentityKey(seedBook.title, seedBook.author));
   }
 
-  return candidates.filter(
-    (candidate) =>
-      !excludedKeys.has(normalizeBookKey(candidate.title, candidate.author ?? "")),
-    );
+  return candidates.filter((candidate) => {
+    const author = candidate.author ?? "";
+    const candidateKeys = [
+      normalizeBookKey(candidate.title, author),
+      normalizedTitleAuthorKey(candidate.title, author),
+      bookIdentityKey(candidate.title, author),
+    ];
+
+    return candidateKeys.every((key) => !excludedKeys.has(key));
+  });
 }
 
 function countCandidates(groups: CandidateGroup[]): number {

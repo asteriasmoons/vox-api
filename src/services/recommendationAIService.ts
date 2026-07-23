@@ -50,6 +50,7 @@ const FALLBACK_CANDIDATE_STRATEGIES: RecommendationStrategy[] = [
   "backlist",
   "adjacent_reads",
 ];
+const SHELF_CANDIDATE_COUNT = 40;
 
 type GroqChatResponse = {
   choices?: Array<{
@@ -280,79 +281,167 @@ function formatReaderContext(request: RecommendationRequest): string {
     .join("\n");
 }
 
+function compactBookSignal(book: {
+  title: string;
+  author?: string;
+  rating?: number;
+  genres?: string[];
+  moods?: string[];
+  tropes?: string[];
+  tags?: string[];
+  seriesName?: string;
+}) {
+  return {
+    title: book.title,
+    ...(book.author ? { author: book.author } : {}),
+    ...(book.rating !== undefined ? { rating: book.rating } : {}),
+    ...(book.genres?.length ? { genres: cleanList(book.genres, 4) } : {}),
+    ...(book.moods?.length ? { moods: cleanList(book.moods, 4) } : {}),
+    ...(book.tropes?.length ? { tropes: cleanList(book.tropes, 4) } : {}),
+    ...(book.tags?.length ? { tags: cleanList(book.tags, 5) } : {}),
+    ...(book.seriesName ? { seriesName: book.seriesName } : {}),
+  };
+}
+
+function topSignals(values: string[], limit: number): string[] {
+  return cleanList(values, limit);
+}
+
+function compactTastePayload(input: {
+  request: RecommendationRequest;
+  intent: RecommendationIntent;
+  profile: RecommendationProfile;
+  seedBook: SeedBook | null;
+  candidateCount: string;
+}) {
+  const context = input.request.readerContext;
+  const highestRatedBooks =
+    context?.highestRatedBooks?.length
+      ? context.highestRatedBooks.slice(0, 15).map(compactBookSignal)
+      : (context?.ratings ?? [])
+          .filter((book) => book.rating >= 4)
+          .sort((a, b) => b.rating - a.rating)
+          .slice(0, 15)
+          .map((book) => ({
+            title: book.title,
+            ...(book.author ? { author: book.author } : {}),
+            rating: book.rating,
+          }));
+  const lowestRatedBooks = (context?.ratings ?? [])
+    .filter((book) => book.rating > 0 && book.rating <= 2.5)
+    .sort((a, b) => a.rating - b.rating)
+    .slice(0, 5)
+    .map((book) => ({
+      title: book.title,
+      ...(book.author ? { author: book.author } : {}),
+      rating: book.rating,
+    }));
+  const recentlyEnjoyedGenres = topSignals(
+    highestRatedBooks.flatMap((book) =>
+      "genres" in book && Array.isArray(book.genres) ? book.genres : [],
+    ),
+    5,
+  );
+  const recentlyEnjoyedMoods = topSignals(
+    highestRatedBooks.flatMap((book) =>
+      "moods" in book && Array.isArray(book.moods) ? book.moods : [],
+    ),
+    5,
+  );
+
+  return {
+    tasteProfile: {
+      favoriteGenres: topSignals(context?.favoriteGenres ?? [], 5),
+      favoriteSubgenres: topSignals(context?.favoriteSubgenres ?? [], 5),
+      favoriteTropes: topSignals(context?.favoriteTropes ?? [], 5),
+      favoriteMoods: topSignals(context?.favoriteMoods ?? [], 5),
+      favoriteThemes: topSignals(context?.favoriteThemes ?? [], 5),
+      favoriteAuthors: topSignals(context?.favoriteAuthors ?? [], 5),
+      favoriteTags: topSignals(context?.favoriteTags ?? [], 6),
+    },
+    ratingSignals: {
+      highestRatedBooks,
+      lowestRatedBooks,
+    },
+    readingPreferences: {
+      ...(context?.pagePreferences
+        ? { pagePreferences: context.pagePreferences }
+        : {}),
+      recentlyEnjoyedGenres:
+        recentlyEnjoyedGenres.length > 0
+          ? recentlyEnjoyedGenres
+          : topSignals(context?.favoriteGenres ?? [], 5),
+      recentlyEnjoyedMoods:
+        recentlyEnjoyedMoods.length > 0
+          ? recentlyEnjoyedMoods
+          : topSignals(context?.favoriteMoods ?? [], 5),
+    },
+    request: {
+      query: input.request.query,
+      requestType: input.intent.requestType,
+      candidateCount: Number(input.candidateCount),
+    },
+    groqAnalysis: {
+      requestAnalysis: {
+        requestType: input.intent.requestType,
+        normalizedQuery: input.intent.normalizedQuery,
+        confidence: input.intent.confidence,
+        entities: input.intent.entities,
+      },
+      recommendationProfile: {
+        requestType: input.profile.requestType,
+        query: input.profile.query,
+        subgenres: input.profile.subgenres,
+        tone: input.profile.tone,
+        pacing: input.profile.pacing,
+        romanceLevel: input.profile.romanceLevel,
+        darknessLevel: input.profile.darknessLevel,
+        keyTropes: input.profile.keyTropes,
+        moods: input.profile.moods,
+        authors: input.profile.authors,
+        comparableBooks: input.profile.comparableBooks,
+      },
+      seedBook: input.seedBook
+        ? {
+            title: input.seedBook.title,
+            author: input.seedBook.author,
+            subjects: input.seedBook.subjects.slice(0, 8),
+            releaseYear: input.seedBook.releaseYear,
+            source: input.seedBook.source,
+          }
+        : null,
+    },
+  };
+}
+
 function formatCandidateHandoff(input: {
   request: RecommendationRequest;
   intent: RecommendationIntent;
   profile: RecommendationProfile;
   seedBook: SeedBook | null;
+  candidateCount: string;
 }): string {
-  const profileForCandidateGeneration = {
-    requestType: input.profile.requestType,
-    query: input.profile.query,
-    subgenres: input.profile.subgenres,
-    tone: input.profile.tone,
-    pacing: input.profile.pacing,
-    romanceLevel: input.profile.romanceLevel,
-    darknessLevel: input.profile.darknessLevel,
-    keyTropes: input.profile.keyTropes,
-    moods: input.profile.moods,
-    authors: input.profile.authors,
-    comparableBooks: input.profile.comparableBooks,
-  };
-
   return [
-    "Sequential pipeline input from Groq:",
+    "Compact AI candidate input:",
     JSON.stringify(
-      {
-        request: {
-          surface: input.request.surface,
-          desiredCount: input.request.desiredCount,
-          minVerifiedResults: input.request.minVerifiedResults,
-          requestTypeHint: input.request.requestTypeHint,
-          query: input.request.query,
-        },
-        requestAnalysis: input.intent,
-        recommendationProfile: profileForCandidateGeneration,
-        seedBook: input.seedBook
-          ? {
-              title: input.seedBook.title,
-              author: input.seedBook.author,
-              subjects: input.seedBook.subjects.slice(0, 18),
-              releaseYear: input.seedBook.releaseYear,
-              source: input.seedBook.source,
-            }
-          : null,
-      },
+      compactTastePayload(input),
       null,
       2,
     ),
+    "",
+    "Owned, finished, current, dismissed, and already recommended books are filtered by backend code after candidate generation. They are intentionally not included in this AI payload.",
   ].join("\n");
-}
-
-function formatRequestExclusions(request: RecommendationRequest): string {
-  const readerContext = request.readerContext;
-  const excluded = [
-    ...(request.excludeBookKeys ?? []),
-    ...(readerContext?.libraryBookKeys ?? []),
-    ...(readerContext?.dismissedBookKeys ?? []),
-    ...(readerContext?.alreadyRecommendedBookKeys ?? []),
-  ];
-
-  const cleaned = cleanList(excluded, 80);
-  return cleaned.length > 0
-    ? `Excluded normalized title-author keys:\n${cleaned.join("\n")}`
-    : "No explicit excluded title-author keys supplied.";
 }
 
 function candidateCountForSurface(request: RecommendationRequest): string {
   if (request.surface === "home") return "4";
-  if (request.surface === "shelf") return String(request.desiredCount);
+  if (request.surface === "shelf") return String(SHELF_CANDIDATE_COUNT);
   return "10";
 }
 
 function fallbackCountForSurface(request: RecommendationRequest): string {
   if (request.surface === "home") return "3";
-  if (request.surface === "shelf") return String(request.desiredCount);
+  if (request.surface === "shelf") return String(SHELF_CANDIDATE_COUNT);
   return "8";
 }
 
@@ -1192,23 +1281,13 @@ Do not recommend books in this step.`;
     profile: RecommendationProfile;
     seedBook: SeedBook | null;
   }): Promise<CandidateGroup[]> {
-    const seedContext = formatSeedContext(
-      input.seedBook,
-      input.intent.normalizedQuery || input.request.query,
-    );
+    const candidateCount = candidateCountForSurface(input.request);
     const prompt = `You are the candidate-generation stage of a sequential Loomey book recommendation pipeline.
 
-A separate reasoning model, Groq, has already interpreted the user's request and created the structured recommendation profile supplied below.
-Do not redo the request-analysis stage. Treat the supplied request analysis and recommendation profile as authoritative.
-Your job is to generate real, relevant book candidates that satisfy the supplied profile and constraints.
+Groq has already interpreted the request. The backend has built a compact taste profile from the reader's data.
+Use only the compact candidate input below. Do not ask for, infer, or require the reader's full library.
 
-${seedContext}
-
-${formatCandidateHandoff(input)}
-
-${formatReaderContext(input.request)}
-
-${formatRequestExclusions(input.request)}
+${formatCandidateHandoff({ ...input, candidateCount })}
 
 Generate multiple candidate groups. Each group should contain real, verifiable books.
 
@@ -1224,7 +1303,6 @@ Rules:
 - Do not recommend the seed book itself.
 - Do not invent books.
 - Do not duplicate titles across groups.
-- Do not include any excluded title-author keys when a title or author clearly matches.
 - Stay faithful to the request type.
 - For author requests, include books by the author and compatible adjacent authors when useful.
 - For genre/subgenre/trope/mood requests, recommend books that strongly express that quality.
@@ -1252,7 +1330,7 @@ Return JSON only:
   ]
 }
 
-Return ${candidateCountForSurface(input.request)} books per strategy where possible.`;
+Return ${candidateCount} books per strategy where possible.`;
 
     return generateCandidateGroupsByStrategy({
       stage: "primary-candidate-generation",
@@ -1260,7 +1338,7 @@ Return ${candidateCountForSurface(input.request)} books per strategy where possi
         "You generate one strategy group of real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
       userPrompt: prompt,
       strategies: primaryStrategiesForSurface(input.request),
-      booksPerStrategy: candidateCountForSurface(input.request),
+      booksPerStrategy: candidateCount,
       isFullShelfRequest: input.request.surface === "shelf",
       temperature: CANDIDATE_TEMPERATURE,
       maxTokens:
@@ -1277,24 +1355,15 @@ Return ${candidateCountForSurface(input.request)} books per strategy where possi
     seedBook: SeedBook | null;
     excludedTitles: string[];
   }): Promise<CandidateGroup[]> {
+    const candidateCount = fallbackCountForSurface(input.request);
     const prompt = `Loomey needs a second recommendation candidate pass because too few books survived catalog verification.
 
-Seed/request context:
-${formatSeedContext(input.seedBook, input.intent.normalizedQuery || input.request.query)}
-
-Sequential pipeline input from Groq:
-${formatCandidateHandoff(input)}
-
-${formatReaderContext(input.request)}
-
-${formatRequestExclusions(input.request)}
-
-Already tried or excluded titles:
-${input.excludedTitles.slice(0, 80).join("\n") || "none"}
+Use only this compact taste payload:
+${formatCandidateHandoff({ ...input, candidateCount })}
 
 Generate additional real books only. Prefer catalog-friendly titles with clear authors and enough metadata to verify.
 Use these strategies only: closest_match, hidden_gems, recent_releases, backlist, adjacent_reads.
-Do not include excluded titles. Do not invent books. Do not reject old books.
+Do not invent books. Do not reject old books.
 Do not return rationale or themes.
 
 Return JSON only:
@@ -1317,7 +1386,7 @@ Return JSON only:
   ]
 }
 
-Return up to ${fallbackCountForSurface(input.request)} books per strategy.`;
+Return up to ${candidateCount} books per strategy.`;
 
     return generateCandidateGroupsByStrategy({
       stage: "fallback-candidate-generation",
@@ -1325,7 +1394,7 @@ Return up to ${fallbackCountForSurface(input.request)} books per strategy.`;
         "You generate one strategy group of additional real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
       userPrompt: prompt,
       strategies: fallbackStrategiesForSurface(input.request),
-      booksPerStrategy: fallbackCountForSurface(input.request),
+      booksPerStrategy: candidateCount,
       isFullShelfRequest: input.request.surface === "shelf",
       temperature: FALLBACK_TEMPERATURE,
       maxTokens:

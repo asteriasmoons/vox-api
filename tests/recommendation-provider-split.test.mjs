@@ -241,11 +241,15 @@ test("primary candidate generation drafts with Mistral, finalizes with OpenRoute
   let mistralCalls = 0;
   let openRouterCalls = 0;
   const sentUserPrompts = [];
+  const sentMistralPrompts = [];
   const sentGroqPrompts = [];
   globalThis.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
     if (String(url) === MISTRAL_URL) {
       mistralCalls += 1;
+      sentMistralPrompts.push(
+        body.messages.find((message) => message.role === "user").content,
+      );
       return jsonResponse(providerResponse("Mistral draft: The Little Stranger by Sarah Waters"));
     }
     if (String(url) === OPENROUTER_URL) {
@@ -277,11 +281,17 @@ test("primary candidate generation drafts with Mistral, finalizes with OpenRoute
   assert.equal(openRouterCalls, 6);
   assert.equal(groqCalls, 6);
   const sentUserPrompt = sentUserPrompts.join("\n");
+  const sentMistralPrompt = sentMistralPrompts.join("\n");
   assert.match(sentUserPrompt, /requestAnalysis/);
   assert.match(sentUserPrompt, /recommendationProfile/);
+  assert.match(sentUserPrompt, /tasteProfile/);
+  assert.match(sentUserPrompt, /ratingSignals/);
+  assert.match(sentUserPrompt, /readingPreferences/);
   assert.match(sentUserPrompt, /wistful gothic romance/);
   assert.doesNotMatch(sentUserPrompt, /"genre": "Gothic Romance"/);
   assert.doesNotMatch(sentUserPrompt, /"themes"/);
+  assert.doesNotMatch(sentUserPrompt, /already-read\|writer/);
+  assert.doesNotMatch(sentMistralPrompt, /already-read\|writer/);
   assert.match(sentUserPrompt, /Mistral draft candidate data/);
   assert.match(sentUserPrompt, /Strategy: closest_match/);
   assert.match(sentUserPrompt, /Strategy: adjacent_reads/);
@@ -329,6 +339,7 @@ test("opened recommendation collection returns 15 books when enough candidates v
   let openLibraryCalls = 0;
   let googleBooksCalls = 0;
   const openRouterPrompts = [];
+  const mistralPrompts = [];
 
   globalThis.fetch = async (url, init) => {
     const urlText = String(url);
@@ -365,6 +376,10 @@ test("opened recommendation collection returns 15 books when enough candidates v
 
     if (urlText === MISTRAL_URL) {
       mistralCalls += 1;
+      const body = JSON.parse(init.body);
+      const prompt =
+        body.messages.find((message) => message.role === "user")?.content ?? "";
+      mistralPrompts.push(prompt);
       return jsonResponse(providerResponse("Mistral collection draft"));
     }
 
@@ -437,6 +452,7 @@ test("opened recommendation collection returns 15 books when enough candidates v
         },
       ],
     },
+    excludeBookKeys: ["owned-book|owned-author"],
   });
 
   const collection = response.collections[0];
@@ -449,7 +465,12 @@ test("opened recommendation collection returns 15 books when enough candidates v
   assert.equal(groqCalls, 3);
   assert.equal(mistralCalls, 1);
   assert.equal(openRouterCalls, 1);
-  assert.match(openRouterPrompts.join("\n"), /full opened collection shelf/i);
+  const openedShelfPrompt = openRouterPrompts.join("\n");
+  assert.match(openedShelfPrompt, /full opened collection shelf/i);
+  assert.match(openedShelfPrompt, /"candidateCount": 40/);
+  assert.match(mistralPrompts.join("\n"), /"candidateCount": 40/);
+  assert.doesNotMatch(openedShelfPrompt, /owned-book\|owned-author/);
+  assert.doesNotMatch(mistralPrompts.join("\n"), /owned-book\|owned-author/);
   assert.doesNotMatch(openRouterPrompts.join("\n"), /Strategy: reader_safe/);
   assert.doesNotMatch(openRouterPrompts.join("\n"), /Strategy: hidden_gems/);
   assert.ok(openLibraryCalls >= 15);

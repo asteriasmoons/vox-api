@@ -38,10 +38,21 @@ export type RecommendationSource =
 export type ReaderRecommendationContext = {
   libraryBookKeys?: string[];
   finishedBookKeys?: string[];
+  currentlyReadingBookKeys?: string[];
   ratings?: Array<{
     title: string;
     author?: string;
     rating: number;
+  }>;
+  highestRatedBooks?: Array<{
+    title: string;
+    author?: string;
+    rating?: number;
+    genres?: string[];
+    moods?: string[];
+    tropes?: string[];
+    tags?: string[];
+    seriesName?: string;
   }>;
   readingSessions?: Array<{
     bookKey: string;
