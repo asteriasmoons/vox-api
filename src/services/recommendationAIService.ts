@@ -34,6 +34,7 @@ const FALLBACK_MAX_TOKENS = 3800;
 const HOME_FALLBACK_MAX_TOKENS = 1100;
 const GROQ_TIMEOUT_MS = 45_000;
 const GROQ_RETRIES = 2;
+const GROQ_SMALL_PROMPT_413_RETRY_CHARS = 4_000;
 const GROQ_CANDIDATE_SCHEMA_RETRIES = 1;
 const FINAL_GROQ_SHELF_MAX_TOKENS = 2400;
 const FINAL_GROQ_STRATEGY_MAX_TOKENS = 1800;
@@ -1059,7 +1060,19 @@ function groqErrorStatus(error: unknown): number | null {
   }
 }
 
-function isRetriableGroqStatus(status: number): boolean {
+function isRetriableGroqStatus(
+  status: number,
+  stage: string,
+  promptChars: number,
+): boolean {
+  if (
+    status === 413 &&
+    stage === "request-analysis" &&
+    promptChars <= GROQ_SMALL_PROMPT_413_RETRY_CHARS
+  ) {
+    return true;
+  }
+
   return [408, 429, 500, 502, 503, 504].includes(status);
 }
 
@@ -1145,7 +1158,20 @@ async function groqChatJson(
       lastError = error;
       if (attempt >= GROQ_RETRIES) break;
       const status = groqErrorStatus(error);
-      if (status !== null && !isRetriableGroqStatus(status)) break;
+      if (
+        status !== null &&
+        !isRetriableGroqStatus(status, options.stage, userPrompt.length)
+      ) {
+        break;
+      }
+      if (status === 413 && options.stage === "request-analysis") {
+        console.warn("[recommendations:groq] retrying small prompt after payload error", {
+          stage: options.stage,
+          promptChars: userPrompt.length,
+          maxSmallPromptChars: GROQ_SMALL_PROMPT_413_RETRY_CHARS,
+          attempt: attempt + 1,
+        });
+      }
       await sleep(groqRateLimitDelayMs(error, attempt) ?? 350 * (attempt + 1));
     } finally {
       clearTimeout(timeout);
@@ -1422,16 +1448,35 @@ Return JSON only with this exact shape:
   }
 }`;
 
-    const raw = await groqChatJson(
-      "You classify book recommendation requests for a reading companion. Return strict JSON only.",
-      prompt,
-      {
-        stage: "request-analysis",
-        temperature: ANALYZE_TEMPERATURE,
-        maxTokens: isHomeSurface ? HOME_ANALYZE_MAX_TOKENS : ANALYZE_MAX_TOKENS,
-        ...(request.groqModel ? { model: request.groqModel } : {}),
-      },
-    );
+    let raw: string;
+    try {
+      raw = await groqChatJson(
+        "You classify book recommendation requests for a reading companion. Return strict JSON only.",
+        prompt,
+        {
+          stage: "request-analysis",
+          temperature: ANALYZE_TEMPERATURE,
+          maxTokens: isHomeSurface ? HOME_ANALYZE_MAX_TOKENS : ANALYZE_MAX_TOKENS,
+          ...(request.groqModel ? { model: request.groqModel } : {}),
+        },
+      );
+    } catch (error) {
+      const status = groqErrorStatus(error);
+      if (request.surface !== "shelf" || (status !== 413 && status !== 429)) {
+        throw error;
+      }
+
+      const intent = fallbackIntent(request);
+      console.warn("[recommendations:groq] request analysis unavailable; using request hint for shelf", {
+        surface: request.surface,
+        requestType: intent.requestType,
+        status,
+        queryLength: request.query.length,
+      });
+      recommendationCacheService.setRequestIntent(cacheKey, intent);
+      return intent;
+    }
+
     const intent = parseIntent(raw, request);
 
     recommendationCacheService.setRequestIntent(cacheKey, intent);

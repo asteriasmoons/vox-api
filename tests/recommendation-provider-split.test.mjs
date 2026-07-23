@@ -213,6 +213,68 @@ test("request analysis calls Groq and not Mistral", async () => {
   assert.equal(mistralCalls, 0);
 });
 
+test("request analysis retries small Groq 413 payload errors", async () => {
+  let groqCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url) === GROQ_URL) {
+      groqCalls += 1;
+      if (groqCalls === 1) {
+        return jsonResponse(
+          {
+            error: {
+              message: "Request Entity Too Large",
+              type: "invalid_request_error",
+              code: "request_too_large",
+            },
+          },
+          413,
+        );
+      }
+      return jsonResponse(providerResponse(JSON.stringify(intent)));
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  const result = await recommendationAIService.analyzeRequest(
+    makeRequest("request analysis small 413 retry"),
+  );
+
+  assert.equal(result.requestType, "mood");
+  assert.equal(groqCalls, 2);
+});
+
+test("shelf request analysis uses request hint after exhausted small Groq 413 errors", async () => {
+  let groqCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url) === GROQ_URL) {
+      groqCalls += 1;
+      return jsonResponse(
+        {
+          error: {
+            message: "Request Entity Too Large",
+            type: "invalid_request_error",
+            code: "request_too_large",
+          },
+        },
+        413,
+      );
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  const result = await recommendationAIService.analyzeRequest({
+    ...makeRequest("shelf request analysis exhausted small 413"),
+    surface: "shelf",
+    requestTypeHint: "specific_book",
+  });
+
+  assert.equal(result.requestType, "specific_book");
+  assert.equal(result.normalizedQuery, "shelf request analysis exhausted small 413");
+  assert.equal(groqCalls, 3);
+});
+
 test("seed-book analysis calls Groq and not Mistral", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
