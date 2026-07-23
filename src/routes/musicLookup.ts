@@ -9,12 +9,13 @@ router.post("/lookup", async (req, res) => {
   try {
     const title = String(req.body?.title || "").trim();
     const artist = String(req.body?.artist || "").trim();
+    const durationSeconds = Number(req.body?.duration) || undefined;
 
     if (!title) {
       return res.status(400).json({ error: "Track title is required" });
     }
 
-    const metadata = await lookupTrackMetadata(title, artist);
+    const metadata = await lookupTrackMetadata(title, artist, durationSeconds);
 
     if (!metadata) {
       return res.status(404).json({
@@ -49,13 +50,14 @@ router.post("/lookup/batch", async (req, res) => {
 
     const results = await Promise.all(
       capped.map(async (entry: unknown) => {
-        const item = entry as { title?: string; artist?: string } | undefined;
+        const item = entry as { title?: string; artist?: string; duration?: number } | undefined;
         const title = String(item?.title || "").trim();
         const artist = String(item?.artist || "").trim();
+        const durationSeconds = Number(item?.duration) || undefined;
 
         if (!title) return { title, artist, metadata: null };
 
-        const metadata = await lookupTrackMetadata(title, artist).catch(
+        const metadata = await lookupTrackMetadata(title, artist, durationSeconds).catch(
           () => null,
         );
 

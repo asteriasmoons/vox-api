@@ -162,6 +162,28 @@ function normalizedForMatch(value: string): string {
     .trim();
 }
 
+function valuesCompatible(requested: string, candidate: string): boolean {
+  if (!requested || !candidate) return false;
+  return candidate === requested ||
+    candidate.includes(requested) ||
+    requested.includes(candidate);
+}
+
+function durationScore(candidateSeconds: number | undefined, requestedSeconds: number | undefined): number {
+  if (!candidateSeconds || !requestedSeconds) return 0;
+
+  const difference = Math.abs(candidateSeconds - requestedSeconds);
+  if (difference <= 3) return 6;
+  if (difference <= 8) return 4;
+  if (difference <= 15) return 2;
+  if (difference > 30) return -8;
+  return 0;
+}
+
+function hasUsableDuration(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 async function fetchWithTimeout<T>(
   url: string | URL,
   headers: Record<string, string>,
@@ -194,6 +216,7 @@ async function fetchWithTimeout<T>(
 async function searchMusicBrainz(
   title: string,
   artist: string,
+  durationSeconds?: number,
 ): Promise<TrackMetadataResult | null> {
   const query = artist
     ? `recording:"${title}" AND artist:"${artist}"`
@@ -209,10 +232,50 @@ async function searchMusicBrainz(
   const recordings = data?.recordings ?? [];
   if (recordings.length === 0) return null;
 
-  const best = recordings[0];
+  const requestedTitle = normalizedForMatch(title);
+  const requestedArtist = normalizedForMatch(artist);
+  const scored = recordings
+    .map((recording) => {
+      const recordingTitle = normalizedForMatch(cleanText(recording.title));
+      const recordingArtist = normalizedForMatch(
+        cleanText(recording["artist-credit"]?.[0]?.artist?.name),
+      );
+      const recordingDuration = recording.length
+        ? Math.round(recording.length / 1000)
+        : undefined;
+      let score = 0;
+
+      if (recordingTitle === requestedTitle) score += 10;
+      if (valuesCompatible(requestedTitle, recordingTitle)) score += 3;
+      if (requestedArtist && recordingArtist === requestedArtist) score += 8;
+      if (requestedArtist && valuesCompatible(requestedArtist, recordingArtist)) {
+        score += 3;
+      }
+      score += durationScore(recordingDuration, durationSeconds);
+
+      return { recording, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const bestScore = scored[0]?.score ?? 0;
+  const best = scored[0]?.recording;
   if (!best) return null;
 
   const artistCredit = best["artist-credit"]?.[0];
+  const recordingTitle = normalizedForMatch(cleanText(best.title));
+  const recordingArtist = normalizedForMatch(cleanText(artistCredit?.artist?.name));
+
+  if (!valuesCompatible(requestedTitle, recordingTitle)) return null;
+  if (requestedArtist && !valuesCompatible(requestedArtist, recordingArtist)) {
+    return null;
+  }
+  if (!requestedArtist && hasUsableDuration(durationSeconds) && bestScore < 14) {
+    return null;
+  }
+  if (!requestedArtist && !hasUsableDuration(durationSeconds)) {
+    return null;
+  }
+
   const release = best.releases?.[0];
   const tags = (best.tags ?? [])
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
@@ -300,10 +363,11 @@ async function searchDiscogs(
 ): Promise<TrackMetadataResult | null> {
   const token = process.env.DISCOGS_TOKEN || "";
   if (!token) return null;
+  if (!artist) return null;
 
   const url = new URL(`${DISCOGS_API}/database/search`);
   url.searchParams.set("track", title);
-  if (artist) url.searchParams.set("artist", artist);
+  url.searchParams.set("artist", artist);
   url.searchParams.set("type", "master");
   url.searchParams.set("per_page", "5");
 
@@ -360,8 +424,6 @@ async function searchDiscogs(
 
   // Fetch artist profile for bio
   const artistSearchUrl = new URL(`${DISCOGS_API}/database/search`);
-  if (!artist) return result;
-
   artistSearchUrl.searchParams.set("q", artist);
   artistSearchUrl.searchParams.set("type", "artist");
   artistSearchUrl.searchParams.set("per_page", "1");
@@ -442,6 +504,7 @@ async function fetchDiscogsArtist(
 async function searchITunes(
   title: string,
   artist: string,
+  durationSeconds?: number,
 ): Promise<TrackMetadataResult | null> {
   const term = artist ? `${artist} ${title}` : title;
   const url = new URL(ITUNES_API);
@@ -461,23 +524,18 @@ async function searchITunes(
     .map((track) => {
       const trackTitle = normalizedForMatch(cleanText(track.trackName));
       const trackArtist = normalizedForMatch(cleanText(track.artistName));
+      const trackDuration = track.trackTimeMillis
+        ? Math.round(track.trackTimeMillis / 1000)
+        : undefined;
       let score = 0;
 
       if (trackTitle === requestedTitle) score += 10;
-      if (
-        trackTitle &&
-        (trackTitle.includes(requestedTitle) || requestedTitle.includes(trackTitle))
-      ) {
-        score += 3;
-      }
+      if (valuesCompatible(requestedTitle, trackTitle)) score += 3;
       if (requestedArtist && trackArtist === requestedArtist) score += 8;
-      if (
-        requestedArtist &&
-        trackArtist &&
-        (trackArtist.includes(requestedArtist) || requestedArtist.includes(trackArtist))
-      ) {
+      if (requestedArtist && valuesCompatible(requestedArtist, trackArtist)) {
         score += 3;
       }
+      score += durationScore(trackDuration, durationSeconds);
       if (track.primaryGenreName) score += 1;
       if (track.artworkUrl100) score += 1;
 
@@ -487,6 +545,21 @@ async function searchITunes(
 
   const best = scored[0]?.track;
   if (!best) return null;
+
+  const bestScore = scored[0]?.score ?? 0;
+  const bestTitle = normalizedForMatch(cleanText(best.trackName));
+  const bestArtist = normalizedForMatch(cleanText(best.artistName));
+
+  if (!valuesCompatible(requestedTitle, bestTitle)) return null;
+  if (requestedArtist && !valuesCompatible(requestedArtist, bestArtist)) {
+    return null;
+  }
+  if (!requestedArtist && hasUsableDuration(durationSeconds) && bestScore < 17) {
+    return null;
+  }
+  if (!requestedArtist && !hasUsableDuration(durationSeconds)) {
+    return null;
+  }
 
   const result: TrackMetadataResult = {
     title: cleanText(best.trackName) || title,
@@ -522,17 +595,21 @@ async function searchITunes(
 export async function lookupTrackMetadata(
   title: string,
   artist: string,
+  durationSeconds?: number,
 ): Promise<TrackMetadataResult | null> {
   const cleanTitle = cleanText(title);
   const cleanArtist = cleanArtistForLookup(artist);
   if (!cleanTitle) return null;
+  const cleanDuration = hasUsableDuration(durationSeconds)
+    ? durationSeconds
+    : undefined;
 
-  const itunesResult = await searchITunes(cleanTitle, cleanArtist).catch(
+  const itunesResult = await searchITunes(cleanTitle, cleanArtist, cleanDuration).catch(
     () => null,
   );
 
   // Try MusicBrainz first
-  const mbResult = await searchMusicBrainz(cleanTitle, cleanArtist);
+  const mbResult = await searchMusicBrainz(cleanTitle, cleanArtist, cleanDuration);
   if (mbResult && mbResult.genres.length > 0) {
     // If MusicBrainz returned genres, try Discogs for supplementary data
     const discogsResult = await searchDiscogs(cleanTitle, cleanArtist).catch(
