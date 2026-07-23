@@ -2,21 +2,11 @@ const DEFAULT_RECOMMENDATION_GROQ_MODEL = "groq/compound";
 const DEFAULT_RECOMMENDATION_COLLECTION_GROQ_MODEL = "groq/compound";
 
 export function recommendationGroqModel(): string {
-  return (
-    process.env.RECOMMENDATION_GROQ_MODEL ||
-    process.env.GROQ_RECOMMENDATION_MODEL ||
-    process.env.GROQ_MODEL ||
-    DEFAULT_RECOMMENDATION_GROQ_MODEL
-  );
+  return DEFAULT_RECOMMENDATION_GROQ_MODEL;
 }
 
 export function recommendationCollectionGroqModel(): string {
-  return (
-    process.env.RECOMMENDATION_COLLECTION_GROQ_MODEL ||
-    process.env.GROQ_RECOMMENDATION_COLLECTION_MODEL ||
-    process.env.GROQ_MODEL ||
-    DEFAULT_RECOMMENDATION_COLLECTION_GROQ_MODEL
-  );
+  return DEFAULT_RECOMMENDATION_COLLECTION_GROQ_MODEL;
 }
 
 export function bookDescriptionGroqModel(): string {

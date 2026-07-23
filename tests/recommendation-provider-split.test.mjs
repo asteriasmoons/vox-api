@@ -17,12 +17,47 @@ const { openRouterChatJson } = await import("../dist/services/openRouterAIClient
 const { recommendationScoringService } = await import(
   "../dist/services/recommendationScoringService.js"
 );
+const { recommendationGroqModel, recommendationCollectionGroqModel } =
+  await import("../dist/services/groqModelConfig.js");
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPEN_LIBRARY_URL = "https://openlibrary.org/search.json";
 const GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes";
+
+test("recommendation Groq model is forced to compound", () => {
+  const previousGroqModel = process.env.GROQ_MODEL;
+  const previousRecommendationModel = process.env.RECOMMENDATION_GROQ_MODEL;
+  const previousCollectionModel = process.env.RECOMMENDATION_COLLECTION_GROQ_MODEL;
+
+  process.env.GROQ_MODEL = "llama-3.1-8b-instant";
+  process.env.RECOMMENDATION_GROQ_MODEL = "llama-3.1-8b-instant";
+  process.env.RECOMMENDATION_COLLECTION_GROQ_MODEL = "llama-3.1-8b-instant";
+
+  try {
+    assert.equal(recommendationGroqModel(), "groq/compound");
+    assert.equal(recommendationCollectionGroqModel(), "groq/compound");
+  } finally {
+    if (previousGroqModel === undefined) {
+      delete process.env.GROQ_MODEL;
+    } else {
+      process.env.GROQ_MODEL = previousGroqModel;
+    }
+
+    if (previousRecommendationModel === undefined) {
+      delete process.env.RECOMMENDATION_GROQ_MODEL;
+    } else {
+      process.env.RECOMMENDATION_GROQ_MODEL = previousRecommendationModel;
+    }
+
+    if (previousCollectionModel === undefined) {
+      delete process.env.RECOMMENDATION_COLLECTION_GROQ_MODEL;
+    } else {
+      process.env.RECOMMENDATION_COLLECTION_GROQ_MODEL = previousCollectionModel;
+    }
+  }
+});
 
 function jsonResponse(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
