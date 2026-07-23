@@ -34,6 +34,21 @@ const HOME_FALLBACK_MAX_TOKENS = 1100;
 const GROQ_TIMEOUT_MS = 45_000;
 const GROQ_RETRIES = 2;
 const MISTRAL_CANDIDATE_SCHEMA_RETRIES = 1;
+const PRIMARY_CANDIDATE_STRATEGIES: RecommendationStrategy[] = [
+  "closest_match",
+  "reader_safe",
+  "hidden_gems",
+  "recent_releases",
+  "backlist",
+  "adjacent_reads",
+];
+const FALLBACK_CANDIDATE_STRATEGIES: RecommendationStrategy[] = [
+  "closest_match",
+  "hidden_gems",
+  "recent_releases",
+  "backlist",
+  "adjacent_reads",
+];
 
 type GroqChatResponse = {
   choices?: Array<{
@@ -312,6 +327,40 @@ function fallbackCountForSurface(request: RecommendationRequest): string {
   return "8";
 }
 
+function strategyLabel(strategy: RecommendationStrategy): string {
+  switch (strategy) {
+    case "closest_match":
+      return "Closest Match";
+    case "reader_safe":
+      return "Reader Safe";
+    case "hidden_gems":
+      return "Hidden Gems";
+    case "recent_releases":
+      return "Recent Releases";
+    case "backlist":
+      return "Backlist";
+    case "adjacent_reads":
+      return "Adjacent Reads";
+  }
+}
+
+function strategyInstruction(strategy: RecommendationStrategy): string {
+  switch (strategy) {
+    case "closest_match":
+      return "Generate tight similarity picks that closely match the profile or seed.";
+    case "reader_safe":
+      return "Generate accessible, satisfying picks that still match the profile.";
+    case "hidden_gems":
+      return "Generate less obvious but real books with strong fit.";
+    case "recent_releases":
+      return "Generate newer books when available, without inventing publication facts.";
+    case "backlist":
+      return "Generate older or established books; old books are allowed when they fit.";
+    case "adjacent_reads":
+      return "Generate nearby reads with one meaningful difference from the core profile.";
+  }
+}
+
 function candidateSchemaRetryInstruction(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
@@ -327,13 +376,15 @@ function candidateSchemaRetryInstruction(error: unknown): string {
   ].join("\n");
 }
 
-async function generateMistralCandidateGroups(input: {
+async function generateMistralCandidateGroup(input: {
   stage: string;
   systemPrompt: string;
   userPrompt: string;
+  strategy: RecommendationStrategy;
+  label: string;
   temperature: number;
   maxTokens: number;
-}): Promise<CandidateGroup[]> {
+}): Promise<CandidateGroup> {
   let prompt = input.userPrompt;
   let lastError: unknown = null;
 
@@ -345,18 +396,19 @@ async function generateMistralCandidateGroups(input: {
     });
 
     try {
-      const groups = parseCandidateGroups(raw);
+      const group = parseCandidateGroup(raw, input.strategy, input.label);
       console.log("[recommendations:mistral] parsed candidates", {
         stage: input.stage,
+        strategy: input.strategy,
         attempt: attempt + 1,
-        groups: groups.length,
-        candidates: groups.reduce((total, group) => total + group.candidates.length, 0),
+        candidates: group.candidates.length,
       });
-      return groups;
+      return group;
     } catch (error) {
       lastError = error;
       console.error("[recommendations:mistral] candidate parse failure", {
         stage: input.stage,
+        strategy: input.strategy,
         attempt: attempt + 1,
         message: error instanceof Error ? error.message : String(error),
         rawLength: raw.length,
@@ -368,6 +420,82 @@ async function generateMistralCandidateGroups(input: {
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function generateMistralCandidateGroupsByStrategy(input: {
+  stage: string;
+  systemPrompt: string;
+  userPrompt: string;
+  strategies: RecommendationStrategy[];
+  booksPerStrategy: string;
+  temperature: number;
+  maxTokens: number;
+}): Promise<CandidateGroup[]> {
+  const groups: CandidateGroup[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const strategy of input.strategies) {
+    const label = strategyLabel(strategy);
+    const group = await generateMistralCandidateGroup({
+      stage: `${input.stage}:${strategy}`,
+      systemPrompt: input.systemPrompt,
+      userPrompt: [
+        input.userPrompt,
+        "",
+        "Generate exactly one candidate group for this strategy only.",
+        `Strategy: ${strategy}`,
+        `Label: ${label}`,
+        `Strategy meaning: ${strategyInstruction(strategy)}`,
+        `Return up to ${input.booksPerStrategy} books for this strategy.`,
+        "",
+        "Return JSON only in this exact shape:",
+        JSON.stringify(
+          {
+            strategy,
+            label,
+            books: [
+              {
+                title: "Book Title",
+                author: "Author Name",
+                summary: "brief optional premise and reading-experience note",
+                rationale: "brief optional reason",
+                genres: ["Fantasy"],
+                moods: ["Cozy"],
+                tropes: ["Found family"],
+                themes: ["Belonging"],
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+      ].join("\n"),
+      strategy,
+      label,
+      temperature: input.temperature,
+      maxTokens: input.maxTokens,
+    });
+
+    const candidates = group.candidates.filter((candidate) => {
+      const key = `${candidate.title.toLowerCase()}|${candidate.author?.toLowerCase() ?? ""}`;
+      if (seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
+
+    if (candidates.length > 0) {
+      groups.push({
+        ...group,
+        candidates,
+      });
+    }
+  }
+
+  if (groups.length === 0) {
+    throw new Error("Mistral candidate stage returned no usable candidates");
+  }
+
+  return groups;
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -596,6 +724,29 @@ export function parseCandidateGroups(raw: string): CandidateGroup[] {
     throw new Error("Mistral candidate stage returned malformed JSON");
   }
 
+  if (
+    !Array.isArray(parsed) &&
+    isRecommendationStrategy((parsed as Record<string, unknown>).strategy) &&
+    Array.isArray((parsed as Record<string, unknown>).books)
+  ) {
+    const record = parsed as Record<string, unknown>;
+    const strategy = record.strategy as RecommendationStrategy;
+    const label = cleanText(record.label) || strategyLabel(strategy);
+    const candidates = parseCandidateBooks(record.books, strategy, label);
+
+    if (candidates.length === 0) {
+      throw new Error("Mistral candidate stage returned no usable candidates");
+    }
+
+    return [
+      {
+        strategy,
+        label,
+        candidates,
+      },
+    ];
+  }
+
   const groups = Array.isArray(parsed)
     ? parsed
     : (parsed as Record<string, unknown>).groups;
@@ -614,41 +765,12 @@ export function parseCandidateGroups(raw: string): CandidateGroup[] {
       const books = Array.isArray(record.books) ? record.books : [];
 
       if (!strategy) return null;
-
-      const candidates = books
-        .map((book): AiBookCandidate | null => {
-          if (!book || typeof book !== "object") return null;
-
-          const item = book as Record<string, unknown>;
-          const title = cleanText(item.title);
-          const author = cleanText(item.author);
-          const summary = cleanText(item.summary);
-          const rationale = cleanText(item.rationale);
-          const genres = cleanList(item.genres, 4);
-          const moods = cleanList(item.moods, 4);
-          const tropes = cleanList(item.tropes, 5);
-          const themes = cleanList(item.themes, 5);
-
-          if (!title || !author) return null;
-
-          return {
-            title,
-            author,
-            strategy,
-            strategyLabel: cleanText(record.label) || strategy.replace(/_/g, " "),
-            ...(summary ? { summary } : {}),
-            ...(rationale ? { rationale } : {}),
-            ...(genres.length > 0 ? { genres } : {}),
-            ...(moods.length > 0 ? { moods } : {}),
-            ...(tropes.length > 0 ? { tropes } : {}),
-            ...(themes.length > 0 ? { themes } : {}),
-          };
-        })
-        .filter((book): book is AiBookCandidate => Boolean(book));
+      const label = cleanText(record.label) || strategyLabel(strategy);
+      const candidates = parseCandidateBooks(books, strategy, label);
 
       return {
         strategy,
-        label: cleanText(record.label) || strategy.replace(/_/g, " "),
+        label,
         candidates,
       };
     })
@@ -660,6 +782,69 @@ export function parseCandidateGroups(raw: string): CandidateGroup[] {
   }
 
   return parsedGroups;
+}
+
+function parseCandidateGroup(
+  raw: string,
+  expectedStrategy: RecommendationStrategy,
+  expectedLabel: string,
+): CandidateGroup {
+  const groups = parseCandidateGroups(raw);
+  const matchingGroup =
+    groups.find((group) => group.strategy === expectedStrategy) ?? groups[0];
+
+  if (!matchingGroup) {
+    throw new Error("Mistral candidate stage returned no usable candidates");
+  }
+
+  return {
+    strategy: expectedStrategy,
+    label: matchingGroup.label || expectedLabel,
+    candidates: matchingGroup.candidates.map((candidate) => ({
+      ...candidate,
+      strategy: expectedStrategy,
+      strategyLabel: candidate.strategyLabel || expectedLabel,
+    })),
+  };
+}
+
+function parseCandidateBooks(
+  books: unknown,
+  strategy: RecommendationStrategy,
+  label: string,
+): AiBookCandidate[] {
+  if (!Array.isArray(books)) return [];
+
+  return books
+    .map((book): AiBookCandidate | null => {
+      if (!book || typeof book !== "object") return null;
+
+      const item = book as Record<string, unknown>;
+      const title = cleanText(item.title);
+      const author = cleanText(item.author);
+      const summary = cleanText(item.summary);
+      const rationale = cleanText(item.rationale);
+      const genres = cleanList(item.genres, 4);
+      const moods = cleanList(item.moods, 4);
+      const tropes = cleanList(item.tropes, 5);
+      const themes = cleanList(item.themes, 5);
+
+      if (!title || !author) return null;
+
+      return {
+        title,
+        author,
+        strategy,
+        strategyLabel: label,
+        ...(summary ? { summary } : {}),
+        ...(rationale ? { rationale } : {}),
+        ...(genres.length > 0 ? { genres } : {}),
+        ...(moods.length > 0 ? { moods } : {}),
+        ...(tropes.length > 0 ? { tropes } : {}),
+        ...(themes.length > 0 ? { themes } : {}),
+      };
+    })
+    .filter((book): book is AiBookCandidate => Boolean(book));
 }
 
 export const recommendationAIService = {
@@ -848,11 +1033,13 @@ Return JSON only:
 
 Return ${candidateCountForSurface(input.request)} books per strategy where possible.`;
 
-    return generateMistralCandidateGroups({
+    return generateMistralCandidateGroupsByStrategy({
       stage: "primary-candidate-generation",
       systemPrompt:
-        "You generate real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
+        "You generate one strategy group of real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
       userPrompt: prompt,
+      strategies: PRIMARY_CANDIDATE_STRATEGIES,
+      booksPerStrategy: candidateCountForSurface(input.request),
       temperature: CANDIDATE_TEMPERATURE,
       maxTokens:
         input.request.surface === "home"
@@ -911,11 +1098,13 @@ Return JSON only:
 
 Return up to ${fallbackCountForSurface(input.request)} books per strategy.`;
 
-    return generateMistralCandidateGroups({
+    return generateMistralCandidateGroupsByStrategy({
       stage: "fallback-candidate-generation",
       systemPrompt:
-        "You generate additional real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
+        "You generate one strategy group of additional real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
       userPrompt: prompt,
+      strategies: FALLBACK_CANDIDATE_STRATEGIES,
+      booksPerStrategy: fallbackCountForSurface(input.request),
       temperature: FALLBACK_TEMPERATURE,
       maxTokens:
         input.request.surface === "home"

@@ -7,6 +7,9 @@ process.env.MISTRAL_API_KEY = "test-mistral-key";
 const { recommendationAIService, parseCandidateGroups } = await import(
   "../dist/services/recommendationAIService.js"
 );
+const { buildRecommendationCollections } = await import(
+  "../dist/services/recommendationCollectionService.js"
+);
 const { mistralChatJson } = await import("../dist/services/mistralAIClient.js");
 const { recommendationScoringService } = await import(
   "../dist/services/recommendationScoringService.js"
@@ -14,6 +17,8 @@ const { recommendationScoringService } = await import(
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions";
+const OPEN_LIBRARY_URL = "https://openlibrary.org/search.json";
+const GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes";
 
 function jsonResponse(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -107,6 +112,47 @@ const candidatePayload = JSON.stringify({
   ],
 });
 
+const recommendationStrategies = [
+  "closest_match",
+  "reader_safe",
+  "hidden_gems",
+  "recent_releases",
+  "backlist",
+  "adjacent_reads",
+];
+
+function strategyCandidatePayload(strategy) {
+  const offset = Math.max(0, recommendationStrategies.indexOf(strategy)) * 10;
+
+  return JSON.stringify({
+    strategy,
+    label: strategy.replace(/_/g, " "),
+    books: Array.from({ length: 10 }, (_, index) => ({
+      title: `Collection Test Book ${offset + index + 1}`,
+      author: `Collection Author ${offset + index + 1}`,
+      summary: `A ${strategy} collection test candidate.`,
+      rationale: "Matches the supplied reader profile.",
+      genres: ["Fantasy Romance"],
+      moods: ["Lush"],
+      tropes: ["Slow burn"],
+      themes: ["Power"],
+    })),
+  });
+}
+
+function parseCatalogBook(url) {
+  const parsedUrl = new URL(String(url));
+  const query = parsedUrl.searchParams.get("q") ?? "";
+  const match = query.match(/Collection Test Book\s+(\d+)/i);
+  const index = match ? Number(match[1]) : 1;
+
+  return {
+    index,
+    title: `Collection Test Book ${index}`,
+    author: `Collection Author ${index}`,
+  };
+}
+
 test("request analysis calls Groq and not Mistral", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
@@ -154,12 +200,14 @@ test("seed-book analysis calls Groq and not Mistral", async () => {
 test("primary candidate generation calls Mistral and includes Groq structure", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
-  let sentUserPrompt = "";
+  const sentUserPrompts = [];
   globalThis.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
     if (String(url) === MISTRAL_URL) {
       mistralCalls += 1;
-      sentUserPrompt = body.messages.find((message) => message.role === "user").content;
+      sentUserPrompts.push(
+        body.messages.find((message) => message.role === "user").content,
+      );
       return jsonResponse(providerResponse(candidatePayload));
     }
     if (String(url) === GROQ_URL) groqCalls += 1;
@@ -174,12 +222,15 @@ test("primary candidate generation calls Mistral and includes Groq structure", a
   });
 
   assert.equal(groups[0].candidates[0].title, "The Little Stranger");
-  assert.equal(mistralCalls, 1);
+  assert.equal(mistralCalls, 6);
   assert.equal(groqCalls, 0);
+  const sentUserPrompt = sentUserPrompts.join("\n");
   assert.match(sentUserPrompt, /requestAnalysis/);
   assert.match(sentUserPrompt, /recommendationProfile/);
   assert.match(sentUserPrompt, /wistful gothic romance/);
   assert.match(sentUserPrompt, /Gothic Romance/);
+  assert.match(sentUserPrompt, /Strategy: closest_match/);
+  assert.match(sentUserPrompt, /Strategy: adjacent_reads/);
 });
 
 test("fallback candidate generation calls Mistral and not Groq", async () => {
@@ -203,8 +254,123 @@ test("fallback candidate generation calls Mistral and not Groq", async () => {
   });
 
   assert.equal(groups[0].strategy, "closest_match");
-  assert.equal(mistralCalls, 1);
+  assert.equal(mistralCalls, 5);
   assert.equal(groqCalls, 0);
+});
+
+test("opened recommendation collection returns 30 books when enough candidates verify", async () => {
+  let groqCalls = 0;
+  let mistralCalls = 0;
+  let openLibraryCalls = 0;
+  let googleBooksCalls = 0;
+
+  globalThis.fetch = async (url, init) => {
+    const urlText = String(url);
+
+    if (urlText === GROQ_URL) {
+      groqCalls += 1;
+      const body = JSON.parse(init.body);
+      const prompt =
+        body.messages.find((message) => message.role === "user")?.content ?? "";
+      return jsonResponse(
+        providerResponse(
+          prompt.includes("Classify")
+            ? JSON.stringify({
+                ...intent,
+                requestType: "genre",
+                normalizedQuery: "collection thirty book provider split",
+                entities: { genre: "Fantasy Romance" },
+              })
+            : JSON.stringify({
+                ...profile,
+                requestType: "genre",
+                query: "collection thirty book provider split",
+                genre: "Fantasy Romance",
+              }),
+        ),
+      );
+    }
+
+    if (urlText === MISTRAL_URL) {
+      mistralCalls += 1;
+      const body = JSON.parse(init.body);
+      const prompt =
+        body.messages.find((message) => message.role === "user")?.content ?? "";
+      const strategy = prompt.match(/Strategy: ([a-z_]+)/)?.[1] ?? "closest_match";
+      return jsonResponse(providerResponse(strategyCandidatePayload(strategy)));
+    }
+
+    if (urlText.startsWith(OPEN_LIBRARY_URL)) {
+      openLibraryCalls += 1;
+      const book = parseCatalogBook(url);
+      return jsonResponse({
+        docs: [
+          {
+            title: book.title,
+            author_name: [book.author],
+            first_publish_year: 2000 + (book.index % 20),
+            cover_i: 1000 + book.index,
+            subject: ["Fantasy Romance", "Slow burn", "Power"],
+          },
+        ],
+      });
+    }
+
+    if (urlText.startsWith(GOOGLE_BOOKS_URL)) {
+      googleBooksCalls += 1;
+      const book = parseCatalogBook(url);
+      return jsonResponse({
+        items: [
+          {
+            volumeInfo: {
+              title: book.title,
+              authors: [book.author],
+              description: `Description for ${book.title}.`,
+              publishedDate: `${2000 + (book.index % 20)}-01-01`,
+              pageCount: 300 + book.index,
+              categories: ["Fiction / Fantasy / Romance"],
+              averageRating: 4.1,
+              imageLinks: {
+                thumbnail: `http://example.com/${book.index}.jpg`,
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected URL ${urlText}`);
+  };
+
+  const response = await buildRecommendationCollections({
+    collectionId: "similar-to-your-favorites",
+    desiredCollections: 5,
+    readerContext: {
+      favoriteGenres: ["Fantasy Romance"],
+      favoriteMoods: ["Lush"],
+      favoriteTropes: ["slow burn"],
+      favoriteAuthors: ["Provider Split Author"],
+      highestRatedBooks: [
+        {
+          title: "Provider Split Favorite",
+          author: "Provider Split Author",
+          rating: 5,
+        },
+      ],
+    },
+  });
+
+  const collection = response.collections[0];
+  assert.equal(response.collections.length, 1);
+  assert.equal(collection.id, "similar-to-your-favorites");
+  assert.equal(collection.title, "Similar To Your Favorites");
+  assert.equal(collection.bookCount, 30);
+  assert.equal(collection.books.length, 30);
+  assert.equal(new Set(collection.books.map((book) => book.title)).size, 30);
+  assert.equal(groqCalls, 2);
+  assert.equal(mistralCalls, 6);
+  assert.ok(openLibraryCalls >= 30);
+  assert.ok(googleBooksCalls >= 30);
 });
 
 test("candidate parser recovers code-fenced JSON", () => {
@@ -218,14 +384,21 @@ test("candidate parser accepts a top-level groups array", () => {
   assert.equal(groups[0].candidates[0].title, "The Little Stranger");
 });
 
+test("candidate parser accepts a single strategy object", () => {
+  const payload = JSON.stringify(JSON.parse(candidatePayload).groups[0]);
+  const groups = parseCandidateGroups(payload);
+  assert.equal(groups[0].strategy, "closest_match");
+  assert.equal(groups[0].candidates[0].author, "Sarah Waters");
+});
+
 test("malformed Mistral candidate output retries with stricter JSON instruction", async () => {
   let calls = 0;
-  let secondPrompt = "";
+  const sentPrompts = [];
   globalThis.fetch = async (url, init) => {
     calls += 1;
     const body = JSON.parse(init.body);
-    if (calls === 2) {
-      secondPrompt = body.messages.find((message) => message.role === "user").content;
+    sentPrompts.push(body.messages.find((message) => message.role === "user").content);
+    if (calls > 1) {
       return jsonResponse(providerResponse(candidatePayload));
     }
 
@@ -240,8 +413,10 @@ test("malformed Mistral candidate output retries with stricter JSON instruction"
   });
 
   assert.equal(groups[0].candidates[0].title, "The Little Stranger");
-  assert.equal(calls, 2);
-  assert.match(secondPrompt, /Critical formatting correction/);
+  assert.equal(calls, 7);
+  assert.ok(
+    sentPrompts.some((prompt) => /Critical formatting correction/.test(prompt)),
+  );
 });
 
 test("malformed Mistral candidate output fails cleanly", async () => {
