@@ -37,7 +37,9 @@ const GROQ_RETRIES = 2;
 const GROQ_CANDIDATE_SCHEMA_RETRIES = 1;
 const FINAL_GROQ_SHELF_MAX_TOKENS = 2400;
 const FINAL_GROQ_STRATEGY_MAX_TOKENS = 1800;
-const FINAL_GROQ_SOURCE_MAX_CHARS = 4500;
+const FINAL_GROQ_SOURCE_MAX_CHARS = 2500;
+const FINAL_GROQ_PROMPT_MAX_CHARS = 7_500;
+const FINAL_SHELF_REPAIR_BOOKS = 24;
 const PRIMARY_CANDIDATE_STRATEGIES: RecommendationStrategy[] = [
   "closest_match",
   "reader_safe",
@@ -535,9 +537,6 @@ function compactCandidateSourceForRepair(input: {
         books: group.candidates.slice(0, input.maxBooks).map((candidate) => ({
           title: candidate.title,
           author: candidate.author ?? "",
-          ...(candidate.genres?.length ? { genres: candidate.genres.slice(0, 4) } : {}),
-          ...(candidate.moods?.length ? { moods: candidate.moods.slice(0, 4) } : {}),
-          ...(candidate.tropes?.length ? { tropes: candidate.tropes.slice(0, 4) } : {}),
         })),
       },
       null,
@@ -557,6 +556,36 @@ function shouldContinueAfterOpenRouterError(error: unknown): boolean {
 
   const status = Number(statusMatch[1]);
   return [408, 429, 500, 502, 503, 504].includes(status);
+}
+
+function parseProviderCandidateGroup(input: {
+  openRouterRaw: string;
+  mistralDraft: string;
+  strategy: RecommendationStrategy;
+  label: string;
+  stage: string;
+}): CandidateGroup | null {
+  const repairSources = [
+    ["openrouter", input.openRouterRaw],
+    ["mistral", input.mistralDraft],
+  ] as const;
+
+  for (const [source, sourceRaw] of repairSources) {
+    try {
+      const group = parseCandidateGroup(sourceRaw, input.strategy, input.label);
+      console.warn("[recommendations:engine] using provider candidates without final Groq parse", {
+        stage: input.stage,
+        strategy: input.strategy,
+        source,
+        candidates: group.candidates.length,
+      });
+      return group;
+    } catch {
+      // Try the next provider source.
+    }
+  }
+
+  return null;
 }
 
 async function generateMistralCandidateDraft(input: {
@@ -602,7 +631,7 @@ async function finalizeCandidateGroupWithGroq(input: {
     input.isFullShelfRequest ? 40 : 10,
   );
   const maxRepairBooks = input.isFullShelfRequest
-    ? Math.min(requestedCount, 40)
+    ? Math.min(requestedCount, FINAL_SHELF_REPAIR_BOOKS)
     : requestedCount;
   const openRouterRepairSource = compactCandidateSourceForRepair({
     raw: input.openRouterRaw,
@@ -656,6 +685,25 @@ async function finalizeCandidateGroupWithGroq(input: {
   ].join("\n");
   let lastError: unknown = null;
 
+  if (prompt.length > FINAL_GROQ_PROMPT_MAX_CHARS) {
+    const providerGroup = parseProviderCandidateGroup({
+      openRouterRaw: input.openRouterRaw,
+      mistralDraft: input.mistralDraft,
+      strategy: input.strategy,
+      label: input.label,
+      stage: input.stage,
+    });
+    if (providerGroup) {
+      console.warn("[recommendations:groq] final parse skipped for oversized prompt", {
+        stage: input.stage,
+        strategy: input.strategy,
+        promptChars: prompt.length,
+        maxPromptChars: FINAL_GROQ_PROMPT_MAX_CHARS,
+      });
+      return providerGroup;
+    }
+  }
+
   for (let attempt = 0; attempt <= GROQ_CANDIDATE_SCHEMA_RETRIES; attempt += 1) {
     let raw: string;
     try {
@@ -686,23 +734,15 @@ async function finalizeCandidateGroupWithGroq(input: {
         message: error instanceof Error ? error.message : String(error),
       });
 
-      const repairSources = [
-        ["openrouter", input.openRouterRaw],
-        ["mistral", input.mistralDraft],
-      ] as const;
-      for (const [source, sourceRaw] of repairSources) {
-        try {
-          const group = parseCandidateGroup(sourceRaw, input.strategy, input.label);
-          console.warn("[recommendations:engine] using provider candidates without final Groq parse", {
-            stage: input.stage,
-            strategy: input.strategy,
-            source,
-            candidates: group.candidates.length,
-          });
-          return group;
-        } catch {
-          // Try the next provider source.
-        }
+      const providerGroup = parseProviderCandidateGroup({
+        openRouterRaw: input.openRouterRaw,
+        mistralDraft: input.mistralDraft,
+        strategy: input.strategy,
+        label: input.label,
+        stage: input.stage,
+      });
+      if (providerGroup) {
+        return providerGroup;
       }
 
       break;
@@ -827,11 +867,19 @@ async function generateCandidateGroupWithProviders(input: {
   const finalJsonJob = input.isFullShelfRequest
     ? "Use the Groq profile, constraints, exclusions, and Mistral draft to return final valid JSON for the full opened shelf."
     : "Use the Groq profile, constraints, exclusions, and Mistral draft to return the final valid JSON.";
+  const finalMistralDraft = compactCandidateSourceForRepair({
+    raw: mistralDraft,
+    strategy: input.strategy,
+    label: input.label,
+    maxBooks: input.isFullShelfRequest
+      ? FINAL_SHELF_REPAIR_BOOKS
+      : numericCandidateLimit(input.booksPerStrategy, 10),
+  }) || mistralDraft.slice(0, FINAL_GROQ_SOURCE_MAX_CHARS);
   const finalPrompt = [
     input.userPrompt,
     "",
     "Mistral draft candidate data:",
-    mistralDraft.slice(0, 18_000),
+    finalMistralDraft,
     "",
     "OpenRouter job:",
     "You are the final JSON stage of a sequential recommendation pipeline.",

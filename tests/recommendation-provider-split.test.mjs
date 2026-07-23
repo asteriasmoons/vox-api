@@ -627,6 +627,78 @@ test("final Groq payload errors recover from valid OpenRouter candidate JSON", a
   assert.equal(groqCalls, 1);
 });
 
+test("oversized shelf repair prompts are compacted before final providers", async () => {
+  let groqCalls = 0;
+  let mistralCalls = 0;
+  let openRouterCalls = 0;
+  const openRouterPrompts = [];
+  const groqPrompts = [];
+  const verboseMistralDraft = strategyCandidatePayload("closest_match", 40);
+
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url) === MISTRAL_URL) {
+      mistralCalls += 1;
+      return jsonResponse(providerResponse(verboseMistralDraft));
+    }
+
+    if (String(url) === OPENROUTER_URL) {
+      openRouterCalls += 1;
+      openRouterPrompts.push(
+        body.messages.find((message) => message.role === "user").content,
+      );
+      return jsonResponse(providerResponse(""));
+    }
+
+    if (String(url) === GROQ_URL) {
+      groqCalls += 1;
+      groqPrompts.push(
+        body.messages.find((message) => message.role === "user").content,
+      );
+      if (groqPrompts.at(-1).length > 7_500) {
+        return jsonResponse(
+          {
+            error: {
+              message: "Request Entity Too Large",
+              type: "invalid_request_error",
+              code: "request_too_large",
+            },
+          },
+          413,
+        );
+      }
+      return jsonResponse(providerResponse(verboseMistralDraft));
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  const groups = await recommendationAIService.generateCandidates({
+    request: {
+      ...makeRequest("oversized final repair prompt"),
+      surface: "shelf",
+      desiredCount: 15,
+      minVerifiedResults: 8,
+    },
+    intent,
+    profile,
+    seedBook,
+  });
+
+  assert.equal(groups[0].candidates.length, 40);
+  assert.equal(mistralCalls, 1);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(groqCalls, 1);
+  assert.ok(
+    openRouterPrompts.every((prompt) => prompt.length < 10_000),
+    "OpenRouter prompt should be compacted before finalization",
+  );
+  assert.ok(
+    groqPrompts.every((prompt) => prompt.length <= 7_500),
+    "Groq final repair prompt should stay below the oversized-payload guard",
+  );
+});
+
 test("malformed Groq final candidate output fails cleanly", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
