@@ -280,7 +280,8 @@ test("primary candidate generation drafts with Mistral, finalizes with OpenRoute
   assert.match(sentUserPrompt, /requestAnalysis/);
   assert.match(sentUserPrompt, /recommendationProfile/);
   assert.match(sentUserPrompt, /wistful gothic romance/);
-  assert.match(sentUserPrompt, /Gothic Romance/);
+  assert.doesNotMatch(sentUserPrompt, /"genre": "Gothic Romance"/);
+  assert.doesNotMatch(sentUserPrompt, /"themes"/);
   assert.match(sentUserPrompt, /Mistral draft candidate data/);
   assert.match(sentUserPrompt, /Strategy: closest_match/);
   assert.match(sentUserPrompt, /Strategy: adjacent_reads/);
@@ -321,7 +322,7 @@ test("fallback candidate generation drafts with Mistral, finalizes with OpenRout
   assert.equal(groqCalls, 5);
 });
 
-test("opened recommendation collection returns 30 books when enough candidates verify", async () => {
+test("opened recommendation collection returns 15 books when enough candidates verify", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
   let openRouterCalls = 0;
@@ -339,7 +340,7 @@ test("opened recommendation collection returns 30 books when enough candidates v
         body.messages.find((message) => message.role === "user")?.content ?? "";
       if (/Groq final JSON parser job|OpenRouter candidate data to parse/.test(prompt)) {
         return jsonResponse(
-          providerResponse(strategyCandidatePayload("closest_match", 30)),
+          providerResponse(strategyCandidatePayload("closest_match", 15)),
         );
       }
 
@@ -374,7 +375,7 @@ test("opened recommendation collection returns 30 books when enough candidates v
         body.messages.find((message) => message.role === "user")?.content ?? "";
       openRouterPrompts.push(prompt);
       const strategy = prompt.match(/Strategy: ([a-z_]+)/)?.[1] ?? "closest_match";
-      const count = /Return up to 30 books/.test(prompt) ? 30 : 10;
+      const count = /Return up to 15 books/.test(prompt) ? 15 : 10;
       return jsonResponse(providerResponse(strategyCandidatePayload(strategy, count)));
     }
 
@@ -442,17 +443,17 @@ test("opened recommendation collection returns 30 books when enough candidates v
   assert.equal(response.collections.length, 1);
   assert.equal(collection.id, "similar-to-your-favorites");
   assert.equal(collection.title, "Similar To Your Favorites");
-  assert.equal(collection.bookCount, 30);
-  assert.equal(collection.books.length, 30);
-  assert.equal(new Set(collection.books.map((book) => book.title)).size, 30);
+  assert.equal(collection.bookCount, 15);
+  assert.equal(collection.books.length, 15);
+  assert.equal(new Set(collection.books.map((book) => book.title)).size, 15);
   assert.equal(groqCalls, 3);
   assert.equal(mistralCalls, 1);
   assert.equal(openRouterCalls, 1);
   assert.match(openRouterPrompts.join("\n"), /full opened collection shelf/i);
   assert.doesNotMatch(openRouterPrompts.join("\n"), /Strategy: reader_safe/);
   assert.doesNotMatch(openRouterPrompts.join("\n"), /Strategy: hidden_gems/);
-  assert.ok(openLibraryCalls >= 30);
-  assert.ok(googleBooksCalls >= 30);
+  assert.ok(openLibraryCalls >= 15);
+  assert.ok(googleBooksCalls >= 15);
 });
 
 test("candidate parser recovers code-fenced JSON", () => {

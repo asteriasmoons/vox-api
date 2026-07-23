@@ -70,6 +70,18 @@ function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function logProviderOutput(
+  provider: "groq" | "mistral" | "openrouter",
+  stage: string,
+  output: string,
+): void {
+  console.log(`[recommendations:${provider}] full output`, {
+    stage,
+    outputLength: output.length,
+    output,
+  });
+}
+
 function cleanList(value: unknown, limit = 12): string[] {
   if (!Array.isArray(value)) return [];
 
@@ -240,23 +252,23 @@ function formatReaderContext(request: RecommendationRequest): string {
   return [
     "Reader-library context:",
     context.favoriteGenres?.length
-      ? `Favorite genres: ${context.favoriteGenres.slice(0, 10).join(", ")}`
+      ? `Favorite genres: ${context.favoriteGenres.slice(0, 5).join(", ")}`
       : "",
     context.favoriteAuthors?.length
-      ? `Favorite authors: ${context.favoriteAuthors.slice(0, 10).join(", ")}`
+      ? `Favorite authors: ${context.favoriteAuthors.slice(0, 5).join(", ")}`
       : "",
     context.favoriteTropes?.length
-      ? `Favorite tropes: ${context.favoriteTropes.slice(0, 10).join(", ")}`
+      ? `Favorite tropes: ${context.favoriteTropes.slice(0, 5).join(", ")}`
       : "",
     context.favoriteMoods?.length
-      ? `Favorite moods: ${context.favoriteMoods.slice(0, 10).join(", ")}`
+      ? `Favorite moods: ${context.favoriteMoods.slice(0, 5).join(", ")}`
       : "",
     context.favoriteTags?.length
-      ? `Favorite tags: ${context.favoriteTags.slice(0, 12).join(", ")}`
+      ? `Favorite tags: ${context.favoriteTags.slice(0, 6).join(", ")}`
       : "",
     context.ratings?.length
       ? `Rated books: ${context.ratings
-          .slice(0, 20)
+          .slice(0, 10)
           .map((rating) => `${rating.title}${rating.author ? ` by ${rating.author}` : ""} (${rating.rating}/5)`)
           .join("; ")}`
       : "",
@@ -274,6 +286,20 @@ function formatCandidateHandoff(input: {
   profile: RecommendationProfile;
   seedBook: SeedBook | null;
 }): string {
+  const profileForCandidateGeneration = {
+    requestType: input.profile.requestType,
+    query: input.profile.query,
+    subgenres: input.profile.subgenres,
+    tone: input.profile.tone,
+    pacing: input.profile.pacing,
+    romanceLevel: input.profile.romanceLevel,
+    darknessLevel: input.profile.darknessLevel,
+    keyTropes: input.profile.keyTropes,
+    moods: input.profile.moods,
+    authors: input.profile.authors,
+    comparableBooks: input.profile.comparableBooks,
+  };
+
   return [
     "Sequential pipeline input from Groq:",
     JSON.stringify(
@@ -286,7 +312,7 @@ function formatCandidateHandoff(input: {
           query: input.request.query,
         },
         requestAnalysis: input.intent,
-        recommendationProfile: input.profile,
+        recommendationProfile: profileForCandidateGeneration,
         seedBook: input.seedBook
           ? {
               title: input.seedBook.title,
@@ -407,6 +433,7 @@ async function generateMistralCandidateDraft(input: {
     temperature: input.temperature,
     maxTokens: input.maxTokens,
   });
+  logProviderOutput("mistral", `${input.stage}:mistral-draft`, draft);
 
   console.log("[recommendations:mistral] drafted candidates", {
     stage: input.stage,
@@ -499,6 +526,11 @@ async function finalizeCandidateGroupWithOpenRouterAndGroq(input: {
     temperature: input.temperature,
     maxTokens: input.maxTokens,
   });
+  logProviderOutput(
+    "openrouter",
+    `${input.stage}:openrouter-final-candidates`,
+    openRouterRaw,
+  );
 
   console.log("[recommendations:openrouter] finalized candidate data", {
     stage: input.stage,
@@ -539,8 +571,9 @@ async function generateCandidateGroupWithProviders(input: {
     "Mistral job:",
     ...draftJob,
     "Do not redo Groq's request analysis. Use Groq's structured profile as authoritative.",
-    "Include title, author, summary, rationale, genres, moods, tropes, and themes when useful.",
-    "A later OpenRouter stage will convert this draft into strict JSON.",
+    "Include title, author, summary, genres, moods, and tropes when useful.",
+    "Do not return rationale or themes.",
+    "If you cannot return clean JSON, return a concise structured list that OpenRouter can convert.",
   ].join("\n");
 
   const mistralDraft = await generateMistralCandidateDraft({
@@ -565,7 +598,9 @@ async function generateCandidateGroupWithProviders(input: {
     "Groq already performed request/profile analysis. Mistral already drafted candidate ideas.",
     finalJsonJob,
     "Ignore any earlier all-groups JSON example in the context.",
-    "Do not return markdown, comments, explanations, or prose outside JSON.",
+    "Do not return rationale or themes.",
+    "Do not return markdown, comments, explanations, or prose outside JSON when possible.",
+    "If you cannot return valid JSON, return a concise structured list that Groq can convert.",
     "Do not invent placeholders. Return real books only.",
     "Return one complete JSON object only in this exact shape:",
     JSON.stringify(
@@ -577,11 +612,9 @@ async function generateCandidateGroupWithProviders(input: {
             title: "Book Title",
             author: "Author Name",
             summary: "brief optional premise and reading-experience note",
-            rationale: "brief optional reason",
             genres: ["Fantasy"],
             moods: ["Cozy"],
             tropes: ["Found family"],
-            themes: ["Belonging"],
           },
         ],
       },
@@ -623,6 +656,7 @@ async function generateCandidateGroupsByStrategy(input: {
           `Label: ${label}`,
           "Use every part of the supplied Groq profile, reader context, and exclusions.",
           `Return up to ${input.booksPerStrategy} books for this shelf.`,
+          "Do not return rationale or themes.",
         ]
       : [
           "Generate exactly one candidate group for this strategy only.",
@@ -649,11 +683,9 @@ async function generateCandidateGroupsByStrategy(input: {
                 title: "Book Title",
                 author: "Author Name",
                 summary: "brief optional premise and reading-experience note",
-                rationale: "brief optional reason",
                 genres: ["Fantasy"],
                 moods: ["Cozy"],
                 tropes: ["Found family"],
-                themes: ["Belonging"],
               },
             ],
           },
@@ -798,7 +830,9 @@ async function groqChatJson(
         durationMs,
       });
 
-      return cleanText(json?.choices?.[0]?.message?.content);
+      const content = cleanText(json?.choices?.[0]?.message?.content);
+      logProviderOutput("groq", options.stage, content);
+      return content;
     } catch (error) {
       lastError = error;
       if (attempt >= GROQ_RETRIES) break;
@@ -1123,15 +1157,12 @@ Return JSON only with this exact shape:
 {
   "requestType": "${input.intent.requestType}",
   "query": "normalized request",
-  "genre": "primary genre",
   "subgenres": ["subgenre"],
   "tone": "overall tone",
   "pacing": "pacing style",
-  "audience": "audience category",
   "romanceLevel": "none/low/medium/high",
   "darknessLevel": "light/medium/dark",
   "keyTropes": ["trope"],
-  "themes": ["theme"],
   "moods": ["mood"],
   "authors": ["author names only when relevant"],
   "comparableBooks": [{"title":"Book Title","author":"Author Name"}]
@@ -1196,9 +1227,9 @@ Rules:
 - Do not include any excluded title-author keys when a title or author clearly matches.
 - Stay faithful to the request type.
 - For author requests, include books by the author and compatible adjacent authors when useful.
-- For genre/subgenre/trope/theme/mood requests, recommend books that strongly express that quality.
+- For genre/subgenre/trope/mood requests, recommend books that strongly express that quality.
 - Publication year is not a filter. Include old books when they fit.
-- Include concise structured genres, moods, tropes, and themes for each book so the app can save useful metadata.
+- Include concise structured genres, moods, and tropes for each book so the app can save useful metadata.
 - Do not copy raw catalog categories. Use reader-facing labels.
 
 Return JSON only:
@@ -1212,11 +1243,9 @@ Return JSON only:
           "title":"Book Title",
           "author":"Author Name",
           "summary":"brief optional premise and reading-experience note",
-          "rationale":"brief optional reason",
           "genres":["Fantasy"],
           "moods":["Cozy"],
-          "tropes":["Found family"],
-          "themes":["Belonging"]
+          "tropes":["Found family"]
         }
       ]
     }
@@ -1266,6 +1295,7 @@ ${input.excludedTitles.slice(0, 80).join("\n") || "none"}
 Generate additional real books only. Prefer catalog-friendly titles with clear authors and enough metadata to verify.
 Use these strategies only: closest_match, hidden_gems, recent_releases, backlist, adjacent_reads.
 Do not include excluded titles. Do not invent books. Do not reject old books.
+Do not return rationale or themes.
 
 Return JSON only:
 {
@@ -1278,11 +1308,9 @@ Return JSON only:
           "title":"Book Title",
           "author":"Author Name",
           "summary":"brief optional premise and reading-experience note",
-          "rationale":"brief optional reason",
           "genres":["Fantasy"],
           "moods":["Cozy"],
-          "tropes":["Found family"],
-          "themes":["Belonging"]
+          "tropes":["Found family"]
         }
       ]
     }

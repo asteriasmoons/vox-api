@@ -110,9 +110,9 @@ type CollectionBlueprint = {
 };
 
 const DEFAULT_COLLECTION_COUNT = 5;
-const DEFAULT_BOOKS_PER_COLLECTION = 30;
+const DEFAULT_BOOKS_PER_COLLECTION = 15;
 const MAX_COLLECTION_COUNT = 6;
-const MAX_BOOKS_PER_COLLECTION = 30;
+const MAX_BOOKS_PER_COLLECTION = 15;
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -387,7 +387,7 @@ export async function buildRecommendationCollections(
       query: blueprint.query,
       surface: "shelf",
       desiredCount: booksPerCollection,
-      minVerifiedResults: Math.min(12, booksPerCollection),
+      minVerifiedResults: Math.min(8, booksPerCollection),
       groqModel,
       requestTypeHint: blueprint.requestTypeHint,
       readerContext: context,
