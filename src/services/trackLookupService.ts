@@ -21,6 +21,10 @@ export type TrackMetadataResult = {
   source: string;
 };
 
+export type TrackMetadataCandidate = TrackMetadataResult & {
+  matchScore: number;
+};
+
 type MusicBrainzRecording = {
   id?: string;
   title?: string;
@@ -157,8 +161,14 @@ function cleanArtistForLookup(value: unknown): string {
 function normalizedForMatch(value: string): string {
   return value
     .toLowerCase()
+    .replace(/[øØ]/g, "o")
+    .replace(/[æÆ]/g, "ae")
+    .replace(/[œŒ]/g, "oe")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/['’]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(ft|feat|featuring)\b/g, "feat")
     .trim();
 }
 
@@ -182,6 +192,56 @@ function durationScore(candidateSeconds: number | undefined, requestedSeconds: n
 
 function hasUsableDuration(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function parseArtistTitle(value: string): { artist: string; title: string } | null {
+  const separators = [" - ", " – ", " — "];
+
+  for (const separator of separators) {
+    const parts = value.split(separator);
+    if (parts.length < 2) continue;
+
+    const artist = cleanText(parts[0]);
+    const title = cleanText(parts.slice(1).join(separator));
+
+    if (artist && title) return { artist, title };
+  }
+
+  return null;
+}
+
+function metadataFromITunesTrack(
+  track: ITunesTrack,
+  fallbackTitle: string,
+  fallbackArtist: string,
+): TrackMetadataResult {
+  const result: TrackMetadataResult = {
+    title: cleanText(track.trackName) || fallbackTitle,
+    artist: cleanText(track.artistName) || fallbackArtist,
+    genres: [],
+    similarArtists: [],
+    source: "iTunes",
+  };
+
+  const genre = cleanText(track.primaryGenreName);
+  const albumTitle = cleanText(track.collectionName);
+  const releaseDate = cleanText(track.releaseDate);
+  const artworkUrl = cleanText(track.artworkUrl100);
+
+  if (genre) result.genres = [genre];
+  if (albumTitle) result.albumTitle = albumTitle;
+  if (releaseDate) result.releaseDate = releaseDate.slice(0, 10);
+  if (artworkUrl) {
+    result.albumArtUrl = artworkUrl.replace(
+      /100x100bb\.(jpg|jpeg|png)$/i,
+      "600x600bb.$1",
+    );
+  }
+  if (track.trackTimeMillis) {
+    result.duration = Math.round(track.trackTimeMillis / 1000);
+  }
+
+  return result;
 }
 
 async function fetchWithTimeout<T>(
@@ -561,33 +621,98 @@ async function searchITunes(
     return null;
   }
 
-  const result: TrackMetadataResult = {
-    title: cleanText(best.trackName) || title,
-    artist: cleanText(best.artistName) || artist,
-    genres: [],
-    similarArtists: [],
-    source: "iTunes",
-  };
+  return metadataFromITunesTrack(best, title, artist);
+}
 
-  const genre = cleanText(best.primaryGenreName);
-  const albumTitle = cleanText(best.collectionName);
-  const releaseDate = cleanText(best.releaseDate);
-  const artworkUrl = cleanText(best.artworkUrl100);
+async function searchITunesCandidates(
+  term: string,
+  requestedTitle: string,
+  requestedArtist: string,
+  durationSeconds?: number,
+  limit = 40,
+): Promise<TrackMetadataCandidate[]> {
+  const url = new URL(ITUNES_API);
+  url.searchParams.set("term", term);
+  url.searchParams.set("media", "music");
+  url.searchParams.set("entity", "song");
+  url.searchParams.set("limit", "200");
 
-  if (genre) result.genres = [genre];
-  if (albumTitle) result.albumTitle = albumTitle;
-  if (releaseDate) result.releaseDate = releaseDate.slice(0, 10);
-  if (artworkUrl) {
-    result.albumArtUrl = artworkUrl.replace(
-      /100x100bb\.(jpg|jpeg|png)$/i,
-      "600x600bb.$1",
-    );
+  const data = await fetchWithTimeout<ITunesSearchResponse>(url.toString(), {});
+  const results = data?.results ?? [];
+  if (results.length === 0) return [];
+
+  const normalizedTerm = normalizedForMatch(term);
+  const queryTokens = normalizedTerm
+    .split(" ")
+    .filter((token) => token.length > 1);
+  const normalizedRequestedTitle = normalizedForMatch(requestedTitle);
+  const normalizedRequestedArtist = normalizedForMatch(requestedArtist);
+
+  return results
+    .map((track) => {
+      const trackTitle = normalizedForMatch(cleanText(track.trackName));
+      const trackArtist = normalizedForMatch(cleanText(track.artistName));
+      const trackAlbum = normalizedForMatch(cleanText(track.collectionName));
+      const combined = `${trackArtist} ${trackTitle} ${trackAlbum}`;
+      const trackDuration = track.trackTimeMillis
+        ? Math.round(track.trackTimeMillis / 1000)
+        : undefined;
+      let score = 0;
+
+      if (trackTitle === normalizedRequestedTitle) score += 10;
+      if (valuesCompatible(normalizedRequestedTitle, trackTitle)) score += 4;
+      if (normalizedRequestedArtist && trackArtist === normalizedRequestedArtist) {
+        score += 10;
+      }
+      if (normalizedRequestedArtist && valuesCompatible(normalizedRequestedArtist, trackArtist)) {
+        score += 4;
+      }
+      score += durationScore(trackDuration, durationSeconds);
+      score += queryTokens.filter((token) => combined.includes(token)).length;
+      if (track.primaryGenreName) score += 1;
+      if (track.artworkUrl100) score += 1;
+
+      return {
+        ...metadataFromITunesTrack(track, requestedTitle || term, requestedArtist),
+        matchScore: score,
+      };
+    })
+    .filter((candidate) => candidate.title && candidate.artist)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, limit);
+}
+
+export async function searchTrackMetadataCandidates(
+  query: string,
+  title: string,
+  artist: string,
+  durationSeconds?: number,
+): Promise<TrackMetadataCandidate[]> {
+  let cleanTitle = cleanText(title);
+  let cleanArtist = cleanArtistForLookup(artist);
+  const cleanQuery = cleanText(query);
+  const term = cleanQuery || [cleanArtist, cleanTitle].filter(Boolean).join(" ");
+
+  if (!term) return [];
+
+  if (!cleanArtist) {
+    const parsed = parseArtistTitle(cleanQuery || cleanTitle);
+    if (parsed) {
+      cleanTitle = parsed.title;
+      cleanArtist = parsed.artist;
+    }
   }
-  if (best.trackTimeMillis) {
-    result.duration = Math.round(best.trackTimeMillis / 1000);
-  }
 
-  return result;
+  const cleanDuration = hasUsableDuration(durationSeconds)
+    ? durationSeconds
+    : undefined;
+
+  return searchITunesCandidates(
+    term,
+    cleanTitle || cleanQuery,
+    cleanArtist,
+    cleanDuration,
+  );
 }
 
 // ── Public API ──
@@ -597,9 +722,20 @@ export async function lookupTrackMetadata(
   artist: string,
   durationSeconds?: number,
 ): Promise<TrackMetadataResult | null> {
-  const cleanTitle = cleanText(title);
-  const cleanArtist = cleanArtistForLookup(artist);
+  let cleanTitle = cleanText(title);
+  let cleanArtist = cleanArtistForLookup(artist);
   if (!cleanTitle) return null;
+
+  if (!cleanArtist) {
+    const parsed = parseArtistTitle(cleanTitle);
+    if (parsed) {
+      cleanTitle = parsed.title;
+      cleanArtist = parsed.artist;
+    }
+  }
+
+  if (!cleanArtist) return null;
+
   const cleanDuration = hasUsableDuration(durationSeconds)
     ? durationSeconds
     : undefined;
