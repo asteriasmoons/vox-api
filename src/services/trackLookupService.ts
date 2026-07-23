@@ -2,6 +2,7 @@
 
 const MUSICBRAINZ_API = "https://musicbrainz.org/ws/2";
 const DISCOGS_API = "https://api.discogs.com";
+const ITUNES_API = "https://itunes.apple.com/search";
 const USER_AGENT = "OctaviaApp/1.0 (asteriasmoons@outlook.com)";
 
 const LOOKUP_TIMEOUT_MS = 12_000;
@@ -126,8 +127,39 @@ type DiscogsMasterResponse = {
   }>;
 };
 
+type ITunesTrack = {
+  trackName?: string;
+  artistName?: string;
+  collectionName?: string;
+  primaryGenreName?: string;
+  releaseDate?: string;
+  artworkUrl100?: string;
+  trackTimeMillis?: number;
+};
+
+type ITunesSearchResponse = {
+  results?: ITunesTrack[];
+};
+
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function cleanArtistForLookup(value: unknown): string {
+  const artist = cleanText(value);
+  const normalized = artist.toLowerCase();
+  if (!artist || normalized === "unknown" || normalized === "unknown artist") {
+    return "";
+  }
+  return artist;
+}
+
+function normalizedForMatch(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 async function fetchWithTimeout<T>(
@@ -163,7 +195,9 @@ async function searchMusicBrainz(
   title: string,
   artist: string,
 ): Promise<TrackMetadataResult | null> {
-  const query = `recording:"${title}" AND artist:"${artist}"`;
+  const query = artist
+    ? `recording:"${title}" AND artist:"${artist}"`
+    : `recording:"${title}"`;
   const url = new URL(`${MUSICBRAINZ_API}/recording`);
   url.searchParams.set("query", query);
   url.searchParams.set("fmt", "json");
@@ -269,7 +303,7 @@ async function searchDiscogs(
 
   const url = new URL(`${DISCOGS_API}/database/search`);
   url.searchParams.set("track", title);
-  url.searchParams.set("artist", artist);
+  if (artist) url.searchParams.set("artist", artist);
   url.searchParams.set("type", "master");
   url.searchParams.set("per_page", "5");
 
@@ -326,6 +360,8 @@ async function searchDiscogs(
 
   // Fetch artist profile for bio
   const artistSearchUrl = new URL(`${DISCOGS_API}/database/search`);
+  if (!artist) return result;
+
   artistSearchUrl.searchParams.set("q", artist);
   artistSearchUrl.searchParams.set("type", "artist");
   artistSearchUrl.searchParams.set("per_page", "1");
@@ -401,6 +437,86 @@ async function fetchDiscogsArtist(
   return {};
 }
 
+// ── iTunes Search ──
+
+async function searchITunes(
+  title: string,
+  artist: string,
+): Promise<TrackMetadataResult | null> {
+  const term = artist ? `${artist} ${title}` : title;
+  const url = new URL(ITUNES_API);
+  url.searchParams.set("term", term);
+  url.searchParams.set("media", "music");
+  url.searchParams.set("entity", "song");
+  url.searchParams.set("limit", "10");
+
+  const data = await fetchWithTimeout<ITunesSearchResponse>(url.toString(), {});
+  const results = data?.results ?? [];
+  if (results.length === 0) return null;
+
+  const requestedTitle = normalizedForMatch(title);
+  const requestedArtist = normalizedForMatch(artist);
+
+  const scored = results
+    .map((track) => {
+      const trackTitle = normalizedForMatch(cleanText(track.trackName));
+      const trackArtist = normalizedForMatch(cleanText(track.artistName));
+      let score = 0;
+
+      if (trackTitle === requestedTitle) score += 10;
+      if (
+        trackTitle &&
+        (trackTitle.includes(requestedTitle) || requestedTitle.includes(trackTitle))
+      ) {
+        score += 3;
+      }
+      if (requestedArtist && trackArtist === requestedArtist) score += 8;
+      if (
+        requestedArtist &&
+        trackArtist &&
+        (trackArtist.includes(requestedArtist) || requestedArtist.includes(trackArtist))
+      ) {
+        score += 3;
+      }
+      if (track.primaryGenreName) score += 1;
+      if (track.artworkUrl100) score += 1;
+
+      return { track, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored[0]?.track;
+  if (!best) return null;
+
+  const result: TrackMetadataResult = {
+    title: cleanText(best.trackName) || title,
+    artist: cleanText(best.artistName) || artist,
+    genres: [],
+    similarArtists: [],
+    source: "iTunes",
+  };
+
+  const genre = cleanText(best.primaryGenreName);
+  const albumTitle = cleanText(best.collectionName);
+  const releaseDate = cleanText(best.releaseDate);
+  const artworkUrl = cleanText(best.artworkUrl100);
+
+  if (genre) result.genres = [genre];
+  if (albumTitle) result.albumTitle = albumTitle;
+  if (releaseDate) result.releaseDate = releaseDate.slice(0, 10);
+  if (artworkUrl) {
+    result.albumArtUrl = artworkUrl.replace(
+      /100x100bb\.(jpg|jpeg|png)$/i,
+      "600x600bb.$1",
+    );
+  }
+  if (best.trackTimeMillis) {
+    result.duration = Math.round(best.trackTimeMillis / 1000);
+  }
+
+  return result;
+}
+
 // ── Public API ──
 
 export async function lookupTrackMetadata(
@@ -408,8 +524,12 @@ export async function lookupTrackMetadata(
   artist: string,
 ): Promise<TrackMetadataResult | null> {
   const cleanTitle = cleanText(title);
-  const cleanArtist = cleanText(artist);
+  const cleanArtist = cleanArtistForLookup(artist);
   if (!cleanTitle) return null;
+
+  const itunesResult = await searchITunes(cleanTitle, cleanArtist).catch(
+    () => null,
+  );
 
   // Try MusicBrainz first
   const mbResult = await searchMusicBrainz(cleanTitle, cleanArtist);
@@ -419,18 +539,27 @@ export async function lookupTrackMetadata(
       () => null,
     );
     if (discogsResult) {
-      return mergeResults(mbResult, discogsResult);
+      const merged = mergeResults(mbResult, discogsResult);
+      return itunesResult ? mergeResults(itunesResult, merged) : merged;
     }
-    return mbResult;
+    return itunesResult ? mergeResults(itunesResult, mbResult) : mbResult;
   }
 
   // MusicBrainz failed or had no genres — try Discogs as primary
   const discogsResult = await searchDiscogs(cleanTitle, cleanArtist);
   if (discogsResult) {
+    const merged = mbResult
+      ? mergeResults(mbResult, discogsResult)
+      : discogsResult;
+    if (itunesResult) return mergeResults(itunesResult, merged);
+    return merged;
+  }
+
+  if (itunesResult) {
     if (mbResult) {
-      return mergeResults(mbResult, discogsResult);
+      return mergeResults(itunesResult, mbResult);
     }
-    return discogsResult;
+    return itunesResult;
   }
 
   // Return whatever MusicBrainz had even without genres
@@ -454,7 +583,9 @@ function mergeResults(
     artist: primary.artist || secondary.artist,
     genres: mergedGenres,
     similarArtists: mergedSimilar,
-    source: "MusicBrainz + Discogs",
+    source: [primary.source, secondary.source]
+      .filter((source, index, sources) => sources.indexOf(source) === index)
+      .join(" + "),
   };
 
   const albumTitle = primary.albumTitle || secondary.albumTitle;
