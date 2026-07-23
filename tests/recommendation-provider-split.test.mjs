@@ -125,13 +125,13 @@ const recommendationStrategies = [
   "adjacent_reads",
 ];
 
-function strategyCandidatePayload(strategy) {
+function strategyCandidatePayload(strategy, count = 10) {
   const offset = Math.max(0, recommendationStrategies.indexOf(strategy)) * 10;
 
   return JSON.stringify({
     strategy,
     label: strategy.replace(/_/g, " "),
-    books: Array.from({ length: 10 }, (_, index) => ({
+    books: Array.from({ length: count }, (_, index) => ({
       title: `Collection Test Book ${offset + index + 1}`,
       author: `Collection Author ${offset + index + 1}`,
       summary: `A ${strategy} collection test candidate.`,
@@ -281,6 +281,7 @@ test("opened recommendation collection returns 30 books when enough candidates v
   let openRouterCalls = 0;
   let openLibraryCalls = 0;
   let googleBooksCalls = 0;
+  const openRouterPrompts = [];
 
   globalThis.fetch = async (url, init) => {
     const urlText = String(url);
@@ -319,8 +320,10 @@ test("opened recommendation collection returns 30 books when enough candidates v
       const body = JSON.parse(init.body);
       const prompt =
         body.messages.find((message) => message.role === "user")?.content ?? "";
+      openRouterPrompts.push(prompt);
       const strategy = prompt.match(/Strategy: ([a-z_]+)/)?.[1] ?? "closest_match";
-      return jsonResponse(providerResponse(strategyCandidatePayload(strategy)));
+      const count = /Return up to 30 books/.test(prompt) ? 30 : 10;
+      return jsonResponse(providerResponse(strategyCandidatePayload(strategy, count)));
     }
 
     if (urlText.startsWith(OPEN_LIBRARY_URL)) {
@@ -391,8 +394,11 @@ test("opened recommendation collection returns 30 books when enough candidates v
   assert.equal(collection.books.length, 30);
   assert.equal(new Set(collection.books.map((book) => book.title)).size, 30);
   assert.equal(groqCalls, 2);
-  assert.equal(mistralCalls, 6);
-  assert.equal(openRouterCalls, 6);
+  assert.equal(mistralCalls, 1);
+  assert.equal(openRouterCalls, 1);
+  assert.match(openRouterPrompts.join("\n"), /full opened collection shelf/i);
+  assert.doesNotMatch(openRouterPrompts.join("\n"), /Strategy: reader_safe/);
+  assert.doesNotMatch(openRouterPrompts.join("\n"), /Strategy: hidden_gems/);
   assert.ok(openLibraryCalls >= 30);
   assert.ok(googleBooksCalls >= 30);
 });

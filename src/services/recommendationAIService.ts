@@ -320,12 +320,28 @@ function formatRequestExclusions(request: RecommendationRequest): string {
 
 function candidateCountForSurface(request: RecommendationRequest): string {
   if (request.surface === "home") return "4";
+  if (request.surface === "shelf") return String(request.desiredCount);
   return "10";
 }
 
 function fallbackCountForSurface(request: RecommendationRequest): string {
   if (request.surface === "home") return "3";
+  if (request.surface === "shelf") return String(request.desiredCount);
   return "8";
+}
+
+function primaryStrategiesForSurface(
+  request: RecommendationRequest,
+): RecommendationStrategy[] {
+  if (request.surface === "shelf") return ["closest_match"];
+  return PRIMARY_CANDIDATE_STRATEGIES;
+}
+
+function fallbackStrategiesForSurface(
+  request: RecommendationRequest,
+): RecommendationStrategy[] {
+  if (request.surface === "shelf") return ["closest_match"];
+  return FALLBACK_CANDIDATE_STRATEGIES;
 }
 
 function strategyLabel(strategy: RecommendationStrategy): string {
@@ -454,14 +470,24 @@ async function generateCandidateGroupWithProviders(input: {
   userPrompt: string;
   strategy: RecommendationStrategy;
   label: string;
+  isFullShelfRequest?: boolean;
   temperature: number;
   maxTokens: number;
 }): Promise<CandidateGroup> {
+  const draftJob = input.isFullShelfRequest
+    ? [
+        "Draft real candidate ideas for the full opened collection shelf.",
+        "This is the one tapped shelf request, not per-strategy work.",
+      ]
+    : [
+        "Draft real candidate ideas for this one strategy.",
+        "This is not the final response.",
+      ];
   const draftPrompt = [
     input.userPrompt,
     "",
     "Mistral job:",
-    "Draft real candidate ideas for this one strategy. This is not the final response.",
+    ...draftJob,
     "Do not redo Groq's request analysis. Use Groq's structured profile as authoritative.",
     "Include title, author, summary, rationale, genres, moods, tropes, and themes when useful.",
     "A later OpenRouter stage will convert this draft into strict JSON.",
@@ -469,11 +495,15 @@ async function generateCandidateGroupWithProviders(input: {
 
   const mistralDraft = await generateMistralCandidateDraft({
     ...input,
-    systemPrompt:
-      "You draft real book recommendation candidates for one strategy. This is intermediate work, not the final API response.",
+    systemPrompt: input.isFullShelfRequest
+      ? "You draft real book recommendation candidates for one opened collection shelf. This is intermediate work, not the final API response."
+      : "You draft real book recommendation candidates for one strategy. This is intermediate work, not the final API response.",
     userPrompt: draftPrompt,
   });
 
+  const finalJsonJob = input.isFullShelfRequest
+    ? "Use the Groq profile, constraints, exclusions, and Mistral draft to return final valid JSON for the full opened shelf."
+    : "Use the Groq profile, constraints, exclusions, and Mistral draft to return the final valid JSON.";
   const finalPrompt = [
     input.userPrompt,
     "",
@@ -483,7 +513,7 @@ async function generateCandidateGroupWithProviders(input: {
     "OpenRouter job:",
     "You are the final JSON stage of a sequential recommendation pipeline.",
     "Groq already performed request/profile analysis. Mistral already drafted candidate ideas.",
-    "Use the Groq profile, constraints, exclusions, and Mistral draft to return the final valid JSON.",
+    finalJsonJob,
     "Ignore any earlier all-groups JSON example in the context.",
     "Do not return markdown, comments, explanations, or prose outside JSON.",
     "Do not invent placeholders. Return real books only.",
@@ -525,6 +555,7 @@ async function generateCandidateGroupsByStrategy(input: {
   userPrompt: string;
   strategies: RecommendationStrategy[];
   booksPerStrategy: string;
+  isFullShelfRequest?: boolean;
   temperature: number;
   maxTokens: number;
 }): Promise<CandidateGroup[]> {
@@ -533,17 +564,29 @@ async function generateCandidateGroupsByStrategy(input: {
 
   for (const strategy of input.strategies) {
     const label = strategyLabel(strategy);
+    const strategyPrompt = input.isFullShelfRequest
+      ? [
+          "Generate the full opened collection shelf in this single request.",
+          "This is the only candidate-generation request for the tapped shelf.",
+          `Strategy field: ${strategy}`,
+          `Label: ${label}`,
+          "Use every part of the supplied Groq profile, reader context, and exclusions.",
+          `Return up to ${input.booksPerStrategy} books for this shelf.`,
+        ]
+      : [
+          "Generate exactly one candidate group for this strategy only.",
+          `Strategy: ${strategy}`,
+          `Label: ${label}`,
+          `Strategy meaning: ${strategyInstruction(strategy)}`,
+          `Return up to ${input.booksPerStrategy} books for this strategy.`,
+        ];
     const group = await generateCandidateGroupWithProviders({
       stage: `${input.stage}:${strategy}`,
       systemPrompt: input.systemPrompt,
       userPrompt: [
         input.userPrompt,
         "",
-        "Generate exactly one candidate group for this strategy only.",
-        `Strategy: ${strategy}`,
-        `Label: ${label}`,
-        `Strategy meaning: ${strategyInstruction(strategy)}`,
-        `Return up to ${input.booksPerStrategy} books for this strategy.`,
+        ...strategyPrompt,
         "",
         "Return JSON only in this exact shape:",
         JSON.stringify(
@@ -569,6 +612,7 @@ async function generateCandidateGroupsByStrategy(input: {
       ].join("\n"),
       strategy,
       label,
+      ...(input.isFullShelfRequest ? { isFullShelfRequest: true } : {}),
       temperature: input.temperature,
       maxTokens: input.maxTokens,
     });
@@ -1135,8 +1179,9 @@ Return ${candidateCountForSurface(input.request)} books per strategy where possi
       systemPrompt:
         "You generate one strategy group of real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
       userPrompt: prompt,
-      strategies: PRIMARY_CANDIDATE_STRATEGIES,
+      strategies: primaryStrategiesForSurface(input.request),
       booksPerStrategy: candidateCountForSurface(input.request),
+      isFullShelfRequest: input.request.surface === "shelf",
       temperature: CANDIDATE_TEMPERATURE,
       maxTokens:
         input.request.surface === "home"
@@ -1200,8 +1245,9 @@ Return up to ${fallbackCountForSurface(input.request)} books per strategy.`;
       systemPrompt:
         "You generate one strategy group of additional real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
       userPrompt: prompt,
-      strategies: FALLBACK_CANDIDATE_STRATEGIES,
+      strategies: fallbackStrategiesForSurface(input.request),
       booksPerStrategy: fallbackCountForSurface(input.request),
+      isFullShelfRequest: input.request.surface === "shelf",
       temperature: FALLBACK_TEMPERATURE,
       maxTokens:
         input.request.surface === "home"
