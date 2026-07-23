@@ -3,6 +3,8 @@ import test from "node:test";
 
 process.env.GROQ_API_KEY = "test-groq-key";
 process.env.MISTRAL_API_KEY = "test-mistral-key";
+process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+process.env.OPENROUTER_MODEL = "test-openrouter-model";
 
 const { recommendationAIService, parseCandidateGroups } = await import(
   "../dist/services/recommendationAIService.js"
@@ -11,12 +13,14 @@ const { buildRecommendationCollections } = await import(
   "../dist/services/recommendationCollectionService.js"
 );
 const { mistralChatJson } = await import("../dist/services/mistralAIClient.js");
+const { openRouterChatJson } = await import("../dist/services/openRouterAIClient.js");
 const { recommendationScoringService } = await import(
   "../dist/services/recommendationScoringService.js"
 );
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPEN_LIBRARY_URL = "https://openlibrary.org/search.json";
 const GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes";
 
@@ -197,14 +201,19 @@ test("seed-book analysis calls Groq and not Mistral", async () => {
   assert.equal(mistralCalls, 0);
 });
 
-test("primary candidate generation calls Mistral and includes Groq structure", async () => {
+test("primary candidate generation drafts with Mistral and finalizes with OpenRouter", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
+  let openRouterCalls = 0;
   const sentUserPrompts = [];
   globalThis.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
     if (String(url) === MISTRAL_URL) {
       mistralCalls += 1;
+      return jsonResponse(providerResponse("Mistral draft: The Little Stranger by Sarah Waters"));
+    }
+    if (String(url) === OPENROUTER_URL) {
+      openRouterCalls += 1;
       sentUserPrompts.push(
         body.messages.find((message) => message.role === "user").content,
       );
@@ -223,22 +232,29 @@ test("primary candidate generation calls Mistral and includes Groq structure", a
 
   assert.equal(groups[0].candidates[0].title, "The Little Stranger");
   assert.equal(mistralCalls, 6);
+  assert.equal(openRouterCalls, 6);
   assert.equal(groqCalls, 0);
   const sentUserPrompt = sentUserPrompts.join("\n");
   assert.match(sentUserPrompt, /requestAnalysis/);
   assert.match(sentUserPrompt, /recommendationProfile/);
   assert.match(sentUserPrompt, /wistful gothic romance/);
   assert.match(sentUserPrompt, /Gothic Romance/);
+  assert.match(sentUserPrompt, /Mistral draft candidate data/);
   assert.match(sentUserPrompt, /Strategy: closest_match/);
   assert.match(sentUserPrompt, /Strategy: adjacent_reads/);
 });
 
-test("fallback candidate generation calls Mistral and not Groq", async () => {
+test("fallback candidate generation drafts with Mistral and finalizes with OpenRouter", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
+  let openRouterCalls = 0;
   globalThis.fetch = async (url) => {
     if (String(url) === MISTRAL_URL) {
       mistralCalls += 1;
+      return jsonResponse(providerResponse("Mistral fallback draft"));
+    }
+    if (String(url) === OPENROUTER_URL) {
+      openRouterCalls += 1;
       return jsonResponse(providerResponse(candidatePayload));
     }
     if (String(url) === GROQ_URL) groqCalls += 1;
@@ -255,12 +271,14 @@ test("fallback candidate generation calls Mistral and not Groq", async () => {
 
   assert.equal(groups[0].strategy, "closest_match");
   assert.equal(mistralCalls, 5);
+  assert.equal(openRouterCalls, 5);
   assert.equal(groqCalls, 0);
 });
 
 test("opened recommendation collection returns 30 books when enough candidates verify", async () => {
   let groqCalls = 0;
   let mistralCalls = 0;
+  let openRouterCalls = 0;
   let openLibraryCalls = 0;
   let googleBooksCalls = 0;
 
@@ -293,6 +311,11 @@ test("opened recommendation collection returns 30 books when enough candidates v
 
     if (urlText === MISTRAL_URL) {
       mistralCalls += 1;
+      return jsonResponse(providerResponse("Mistral collection draft"));
+    }
+
+    if (urlText === OPENROUTER_URL) {
+      openRouterCalls += 1;
       const body = JSON.parse(init.body);
       const prompt =
         body.messages.find((message) => message.role === "user")?.content ?? "";
@@ -369,6 +392,7 @@ test("opened recommendation collection returns 30 books when enough candidates v
   assert.equal(new Set(collection.books.map((book) => book.title)).size, 30);
   assert.equal(groqCalls, 2);
   assert.equal(mistralCalls, 6);
+  assert.equal(openRouterCalls, 6);
   assert.ok(openLibraryCalls >= 30);
   assert.ok(googleBooksCalls >= 30);
 });
@@ -391,18 +415,28 @@ test("candidate parser accepts a single strategy object", () => {
   assert.equal(groups[0].candidates[0].author, "Sarah Waters");
 });
 
-test("malformed Mistral candidate output retries with stricter JSON instruction", async () => {
-  let calls = 0;
+test("malformed OpenRouter candidate output retries with stricter JSON instruction", async () => {
+  let mistralCalls = 0;
+  let openRouterCalls = 0;
   const sentPrompts = [];
   globalThis.fetch = async (url, init) => {
-    calls += 1;
     const body = JSON.parse(init.body);
-    sentPrompts.push(body.messages.find((message) => message.role === "user").content);
-    if (calls > 1) {
-      return jsonResponse(providerResponse(candidatePayload));
+    if (String(url) === MISTRAL_URL) {
+      mistralCalls += 1;
+      return jsonResponse(providerResponse("Mistral draft"));
     }
 
-    return jsonResponse(providerResponse("not json"));
+    if (String(url) === OPENROUTER_URL) {
+      openRouterCalls += 1;
+      sentPrompts.push(body.messages.find((message) => message.role === "user").content);
+      if (openRouterCalls > 1) {
+        return jsonResponse(providerResponse(candidatePayload));
+      }
+
+      return jsonResponse(providerResponse("not json"));
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
   };
 
   const groups = await recommendationAIService.generateCandidates({
@@ -413,17 +447,28 @@ test("malformed Mistral candidate output retries with stricter JSON instruction"
   });
 
   assert.equal(groups[0].candidates[0].title, "The Little Stranger");
-  assert.equal(calls, 7);
+  assert.equal(mistralCalls, 6);
+  assert.equal(openRouterCalls, 7);
   assert.ok(
     sentPrompts.some((prompt) => /Critical formatting correction/.test(prompt)),
   );
 });
 
-test("malformed Mistral candidate output fails cleanly", async () => {
-  let calls = 0;
-  globalThis.fetch = async () => {
-    calls += 1;
+test("malformed OpenRouter candidate output fails cleanly", async () => {
+  let mistralCalls = 0;
+  let openRouterCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url) === MISTRAL_URL) {
+      mistralCalls += 1;
+      return jsonResponse(providerResponse("Mistral draft"));
+    }
+
+    if (String(url) === OPENROUTER_URL) {
+      openRouterCalls += 1;
     return jsonResponse(providerResponse("not json"));
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
   };
 
   await assert.rejects(
@@ -435,7 +480,8 @@ test("malformed Mistral candidate output fails cleanly", async () => {
     }),
     /malformed JSON/,
   );
-  assert.equal(calls, 2);
+  assert.equal(mistralCalls, 1);
+  assert.equal(openRouterCalls, 2);
 });
 
 test("transient Mistral errors use bounded retries", async () => {
@@ -471,6 +517,47 @@ test("Mistral auth and invalid-request errors are not retried", async () => {
   await assert.rejects(
     mistralChatJson("system", "user", {
       stage: "test-auth",
+      temperature: 0.1,
+      maxTokens: 200,
+    }),
+    /HTTP 401/,
+  );
+  assert.equal(calls, 1);
+});
+
+test("transient OpenRouter errors use bounded retries", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return jsonResponse({ error: { message: "rate limited" } }, 429, {
+        "retry-after": "0",
+      });
+    }
+
+    return jsonResponse(providerResponse(candidatePayload));
+  };
+
+  const content = await openRouterChatJson("system", "user", {
+    stage: "test-openrouter-transient",
+    temperature: 0.1,
+    maxTokens: 200,
+  });
+
+  assert.equal(JSON.parse(content).groups.length, 1);
+  assert.equal(calls, 2);
+});
+
+test("OpenRouter auth and invalid-request errors are not retried", async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return jsonResponse({ error: { message: "bad key" } }, 401);
+  };
+
+  await assert.rejects(
+    openRouterChatJson("system", "user", {
+      stage: "test-openrouter-auth",
       temperature: 0.1,
       maxTokens: 200,
     }),

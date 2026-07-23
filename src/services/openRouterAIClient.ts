@@ -1,24 +1,23 @@
-import { recommendationMistralModel } from "./mistralModelConfig";
+import { recommendationOpenRouterModel } from "./openRouterModelConfig";
 
-const MISTRAL_CHAT_COMPLETIONS_URL =
-  "https://api.mistral.ai/v1/chat/completions";
-const MISTRAL_TIMEOUT_MS = 60_000;
-const MISTRAL_RETRIES = 2;
+const OPENROUTER_CHAT_COMPLETIONS_URL =
+  "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_TIMEOUT_MS = 60_000;
+const OPENROUTER_RETRIES = 2;
 
-type MistralMessage = {
+type OpenRouterMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
 
-type MistralChatOptions = {
+type OpenRouterChatOptions = {
   stage: string;
   temperature: number;
   maxTokens: number;
   model?: string;
-  responseFormat?: "json_object" | "text";
 };
 
-type MistralChatResponse = {
+type OpenRouterChatResponse = {
   choices?: Array<{
     message?: {
       content?: unknown;
@@ -60,10 +59,10 @@ function safeErrorMessage(body: ProviderErrorBody | null): string {
   if (typeof error === "string") return error;
   if (error && typeof error === "object") {
     const record = error as Record<string, unknown>;
-    return cleanText(record.message) || cleanText(record.type) || "Mistral error";
+    return cleanText(record.message) || cleanText(record.type) || "OpenRouter error";
   }
 
-  return cleanText(body?.message) || "Mistral error";
+  return cleanText(body?.message) || "OpenRouter error";
 }
 
 function retryAfterDelayMs(response: Response, attempt: number): number {
@@ -100,36 +99,36 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function mistralChat(
+export async function openRouterChatJson(
   systemPrompt: string,
   userPrompt: string,
-  options: MistralChatOptions,
+  options: OpenRouterChatOptions,
 ): Promise<string> {
-  const apiKey = process.env.MISTRAL_API_KEY || "";
+  const apiKey = process.env.OPENROUTER_API_KEY || "";
   if (!apiKey) {
-    throw new Error("Missing MISTRAL_API_KEY environment variable");
+    throw new Error("Missing OPENROUTER_API_KEY environment variable");
   }
 
-  const model = options.model ?? recommendationMistralModel();
+  const model = options.model ?? recommendationOpenRouterModel();
   let lastError: unknown = null;
 
-  for (let attempt = 0; attempt <= MISTRAL_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= OPENROUTER_RETRIES; attempt += 1) {
     const startedAt = Date.now();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), MISTRAL_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), OPENROUTER_TIMEOUT_MS);
 
     try {
-      console.log("[recommendations:mistral] request", {
+      console.log("[recommendations:openrouter] request", {
         stage: options.stage,
         model,
         attempt: attempt + 1,
       });
 
-      const messages: MistralMessage[] = [
+      const messages: OpenRouterMessage[] = [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ];
-      const response = await fetch(MISTRAL_CHAT_COMPLETIONS_URL, {
+      const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -139,22 +138,20 @@ async function mistralChat(
           model,
           temperature: options.temperature,
           max_tokens: options.maxTokens,
-          ...(options.responseFormat !== "text"
-            ? { response_format: { type: "json_object" } }
-            : {}),
+          response_format: { type: "json_object" },
           messages,
         }),
         signal: controller.signal,
       });
       const json = (await response.json().catch(() => null)) as
-        | MistralChatResponse
+        | OpenRouterChatResponse
         | ProviderErrorBody
         | null;
       const durationMs = Date.now() - startedAt;
 
       if (!response.ok) {
         const message = safeErrorMessage(json as ProviderErrorBody | null);
-        console.error("[recommendations:mistral] failure", {
+        console.error("[recommendations:openrouter] failure", {
           stage: options.stage,
           model,
           attempt: attempt + 1,
@@ -165,11 +162,11 @@ async function mistralChat(
         });
 
         const error = new Error(
-          `Mistral ${options.stage} failed with HTTP ${response.status}: ${message}`,
+          `OpenRouter ${options.stage} failed with HTTP ${response.status}: ${message}`,
         );
         lastError = error;
 
-        if (!isTransientStatus(response.status) || attempt >= MISTRAL_RETRIES) {
+        if (!isTransientStatus(response.status) || attempt >= OPENROUTER_RETRIES) {
           throw error;
         }
 
@@ -178,17 +175,17 @@ async function mistralChat(
       }
 
       const content = cleanText(
-        contentToText((json as MistralChatResponse | null)?.choices?.[0]?.message?.content),
+        contentToText((json as OpenRouterChatResponse | null)?.choices?.[0]?.message?.content),
       );
-      console.log("[recommendations:mistral] success", {
+      console.log("[recommendations:openrouter] success", {
         stage: options.stage,
         model,
         attempt: attempt + 1,
         durationMs,
-        promptTokens: (json as MistralChatResponse | null)?.usage?.prompt_tokens,
+        promptTokens: (json as OpenRouterChatResponse | null)?.usage?.prompt_tokens,
         completionTokens:
-          (json as MistralChatResponse | null)?.usage?.completion_tokens,
-        totalTokens: (json as MistralChatResponse | null)?.usage?.total_tokens,
+          (json as OpenRouterChatResponse | null)?.usage?.completion_tokens,
+        totalTokens: (json as OpenRouterChatResponse | null)?.usage?.total_tokens,
       });
 
       return content;
@@ -197,15 +194,15 @@ async function mistralChat(
       lastError = error;
 
       if (isAbortError(error)) {
-        console.error("[recommendations:mistral] timeout", {
+        console.error("[recommendations:openrouter] timeout", {
           stage: options.stage,
           model,
           attempt: attempt + 1,
           durationMs,
-          timeoutMs: MISTRAL_TIMEOUT_MS,
+          timeoutMs: OPENROUTER_TIMEOUT_MS,
         });
-      } else if (!(error instanceof Error && error.message.startsWith("Mistral "))) {
-        console.error("[recommendations:mistral] failure", {
+      } else if (!(error instanceof Error && error.message.startsWith("OpenRouter "))) {
+        console.error("[recommendations:openrouter] failure", {
           stage: options.stage,
           model,
           attempt: attempt + 1,
@@ -214,8 +211,8 @@ async function mistralChat(
         });
       }
 
-      if (attempt >= MISTRAL_RETRIES) break;
-      if (error instanceof Error && error.message.startsWith("Mistral ")) break;
+      if (attempt >= OPENROUTER_RETRIES) break;
+      if (error instanceof Error && error.message.startsWith("OpenRouter ")) break;
       await sleep(Math.min(750 * 2 ** attempt, 8_000));
     } finally {
       clearTimeout(timeout);
@@ -224,31 +221,10 @@ async function mistralChat(
 
   if (isAbortError(lastError)) {
     throw new Error(
-      `Mistral ${options.stage} timed out after ${MISTRAL_TIMEOUT_MS / 1000}s`,
+      `OpenRouter ${options.stage} timed out after ${OPENROUTER_TIMEOUT_MS / 1000}s`,
     );
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-export async function mistralChatJson(
-  systemPrompt: string,
-  userPrompt: string,
-  options: MistralChatOptions,
-): Promise<string> {
-  return mistralChat(systemPrompt, userPrompt, {
-    ...options,
-    responseFormat: "json_object",
-  });
-}
-
-export async function mistralChatText(
-  systemPrompt: string,
-  userPrompt: string,
-  options: MistralChatOptions,
-): Promise<string> {
-  return mistralChat(systemPrompt, userPrompt, {
-    ...options,
-    responseFormat: "text",
-  });
-}

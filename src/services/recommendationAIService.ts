@@ -1,6 +1,7 @@
 import { recommendationCacheService } from "./recommendationCacheService";
 import { recommendationGroqModel } from "./groqModelConfig";
-import { mistralChatJson } from "./mistralAIClient";
+import { mistralChatText } from "./mistralAIClient";
+import { openRouterChatJson } from "./openRouterAIClient";
 import type {
   AiBookCandidate,
   CandidateGroup,
@@ -33,7 +34,7 @@ const FALLBACK_MAX_TOKENS = 3800;
 const HOME_FALLBACK_MAX_TOKENS = 1100;
 const GROQ_TIMEOUT_MS = 45_000;
 const GROQ_RETRIES = 2;
-const MISTRAL_CANDIDATE_SCHEMA_RETRIES = 1;
+const OPENROUTER_CANDIDATE_SCHEMA_RETRIES = 1;
 const PRIMARY_CANDIDATE_STRATEGIES: RecommendationStrategy[] = [
   "closest_match",
   "reader_safe",
@@ -371,15 +372,40 @@ function candidateSchemaRetryInstruction(error: unknown): string {
     "Return one complete JSON object only.",
     "Do not use markdown, code fences, comments, explanations, or trailing prose.",
     "Do not truncate the JSON.",
-    "The top-level object must be exactly shaped like {\"groups\":[...]} with valid arrays.",
+    "The top-level object must be exactly shaped like {\"strategy\":\"closest_match\",\"label\":\"Closest Match\",\"books\":[...]} with valid arrays.",
     "Every book must include non-empty string title and author fields.",
   ].join("\n");
 }
 
-async function generateMistralCandidateGroup(input: {
+async function generateMistralCandidateDraft(input: {
   stage: string;
   systemPrompt: string;
   userPrompt: string;
+  strategy: RecommendationStrategy;
+  label: string;
+  temperature: number;
+  maxTokens: number;
+}): Promise<string> {
+  const draft = await mistralChatText(input.systemPrompt, input.userPrompt, {
+    stage: `${input.stage}:mistral-draft`,
+    temperature: input.temperature,
+    maxTokens: input.maxTokens,
+  });
+
+  console.log("[recommendations:mistral] drafted candidates", {
+    stage: input.stage,
+    strategy: input.strategy,
+    draftLength: draft.length,
+  });
+
+  return draft;
+}
+
+async function finalizeCandidateGroupWithOpenRouter(input: {
+  stage: string;
+  systemPrompt: string;
+  userPrompt: string;
+  mistralDraft: string;
   strategy: RecommendationStrategy;
   label: string;
   temperature: number;
@@ -388,16 +414,16 @@ async function generateMistralCandidateGroup(input: {
   let prompt = input.userPrompt;
   let lastError: unknown = null;
 
-  for (let attempt = 0; attempt <= MISTRAL_CANDIDATE_SCHEMA_RETRIES; attempt += 1) {
-    const raw = await mistralChatJson(input.systemPrompt, prompt, {
-      stage: input.stage,
+  for (let attempt = 0; attempt <= OPENROUTER_CANDIDATE_SCHEMA_RETRIES; attempt += 1) {
+    const raw = await openRouterChatJson(input.systemPrompt, prompt, {
+      stage: `${input.stage}:openrouter-final-json`,
       temperature: input.temperature,
       maxTokens: input.maxTokens,
     });
 
     try {
       const group = parseCandidateGroup(raw, input.strategy, input.label);
-      console.log("[recommendations:mistral] parsed candidates", {
+      console.log("[recommendations:openrouter] parsed candidates", {
         stage: input.stage,
         strategy: input.strategy,
         attempt: attempt + 1,
@@ -406,7 +432,7 @@ async function generateMistralCandidateGroup(input: {
       return group;
     } catch (error) {
       lastError = error;
-      console.error("[recommendations:mistral] candidate parse failure", {
+      console.error("[recommendations:openrouter] candidate parse failure", {
         stage: input.stage,
         strategy: input.strategy,
         attempt: attempt + 1,
@@ -414,7 +440,7 @@ async function generateMistralCandidateGroup(input: {
         rawLength: raw.length,
       });
 
-      if (attempt >= MISTRAL_CANDIDATE_SCHEMA_RETRIES) break;
+      if (attempt >= OPENROUTER_CANDIDATE_SCHEMA_RETRIES) break;
       prompt = `${input.userPrompt}${candidateSchemaRetryInstruction(error)}`;
     }
   }
@@ -422,7 +448,78 @@ async function generateMistralCandidateGroup(input: {
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-async function generateMistralCandidateGroupsByStrategy(input: {
+async function generateCandidateGroupWithProviders(input: {
+  stage: string;
+  systemPrompt: string;
+  userPrompt: string;
+  strategy: RecommendationStrategy;
+  label: string;
+  temperature: number;
+  maxTokens: number;
+}): Promise<CandidateGroup> {
+  const draftPrompt = [
+    input.userPrompt,
+    "",
+    "Mistral job:",
+    "Draft real candidate ideas for this one strategy. This is not the final response.",
+    "Do not redo Groq's request analysis. Use Groq's structured profile as authoritative.",
+    "Include title, author, summary, rationale, genres, moods, tropes, and themes when useful.",
+    "A later OpenRouter stage will convert this draft into strict JSON.",
+  ].join("\n");
+
+  const mistralDraft = await generateMistralCandidateDraft({
+    ...input,
+    systemPrompt:
+      "You draft real book recommendation candidates for one strategy. This is intermediate work, not the final API response.",
+    userPrompt: draftPrompt,
+  });
+
+  const finalPrompt = [
+    input.userPrompt,
+    "",
+    "Mistral draft candidate data:",
+    mistralDraft.slice(0, 18_000),
+    "",
+    "OpenRouter job:",
+    "You are the final JSON stage of a sequential recommendation pipeline.",
+    "Groq already performed request/profile analysis. Mistral already drafted candidate ideas.",
+    "Use the Groq profile, constraints, exclusions, and Mistral draft to return the final valid JSON.",
+    "Ignore any earlier all-groups JSON example in the context.",
+    "Do not return markdown, comments, explanations, or prose outside JSON.",
+    "Do not invent placeholders. Return real books only.",
+    "Return one complete JSON object only in this exact shape:",
+    JSON.stringify(
+      {
+        strategy: input.strategy,
+        label: input.label,
+        books: [
+          {
+            title: "Book Title",
+            author: "Author Name",
+            summary: "brief optional premise and reading-experience note",
+            rationale: "brief optional reason",
+            genres: ["Fantasy"],
+            moods: ["Cozy"],
+            tropes: ["Found family"],
+            themes: ["Belonging"],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  ].join("\n");
+
+  return finalizeCandidateGroupWithOpenRouter({
+    ...input,
+    systemPrompt:
+      "You finalize book recommendation candidates into one strict JSON object for catalog verification. Return JSON only.",
+    userPrompt: finalPrompt,
+    mistralDraft,
+  });
+}
+
+async function generateCandidateGroupsByStrategy(input: {
   stage: string;
   systemPrompt: string;
   userPrompt: string;
@@ -436,7 +533,7 @@ async function generateMistralCandidateGroupsByStrategy(input: {
 
   for (const strategy of input.strategies) {
     const label = strategyLabel(strategy);
-    const group = await generateMistralCandidateGroup({
+    const group = await generateCandidateGroupWithProviders({
       stage: `${input.stage}:${strategy}`,
       systemPrompt: input.systemPrompt,
       userPrompt: [
@@ -492,7 +589,7 @@ async function generateMistralCandidateGroupsByStrategy(input: {
   }
 
   if (groups.length === 0) {
-    throw new Error("Mistral candidate stage returned no usable candidates");
+    throw new Error("Candidate final JSON stage returned no usable candidates");
   }
 
   return groups;
@@ -721,7 +818,7 @@ function parseProfile(
 export function parseCandidateGroups(raw: string): CandidateGroup[] {
   const parsed = parseJsonObjectOrArray(raw);
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("Mistral candidate stage returned malformed JSON");
+    throw new Error("Candidate final JSON stage returned malformed JSON");
   }
 
   if (
@@ -735,7 +832,7 @@ export function parseCandidateGroups(raw: string): CandidateGroup[] {
     const candidates = parseCandidateBooks(record.books, strategy, label);
 
     if (candidates.length === 0) {
-      throw new Error("Mistral candidate stage returned no usable candidates");
+      throw new Error("Candidate final JSON stage returned no usable candidates");
     }
 
     return [
@@ -751,7 +848,7 @@ export function parseCandidateGroups(raw: string): CandidateGroup[] {
     ? parsed
     : (parsed as Record<string, unknown>).groups;
   if (!Array.isArray(groups)) {
-    throw new Error("Mistral candidate stage returned JSON without groups");
+    throw new Error("Candidate final JSON stage returned JSON without groups");
   }
 
   const parsedGroups = groups
@@ -778,7 +875,7 @@ export function parseCandidateGroups(raw: string): CandidateGroup[] {
     .filter((group) => group.candidates.length > 0);
 
   if (parsedGroups.length === 0) {
-    throw new Error("Mistral candidate stage returned no usable candidates");
+    throw new Error("Candidate final JSON stage returned no usable candidates");
   }
 
   return parsedGroups;
@@ -794,7 +891,7 @@ function parseCandidateGroup(
     groups.find((group) => group.strategy === expectedStrategy) ?? groups[0];
 
   if (!matchingGroup) {
-    throw new Error("Mistral candidate stage returned no usable candidates");
+    throw new Error("Candidate final JSON stage returned no usable candidates");
   }
 
   return {
@@ -1033,7 +1130,7 @@ Return JSON only:
 
 Return ${candidateCountForSurface(input.request)} books per strategy where possible.`;
 
-    return generateMistralCandidateGroupsByStrategy({
+    return generateCandidateGroupsByStrategy({
       stage: "primary-candidate-generation",
       systemPrompt:
         "You generate one strategy group of real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
@@ -1098,7 +1195,7 @@ Return JSON only:
 
 Return up to ${fallbackCountForSurface(input.request)} books per strategy.`;
 
-    return generateMistralCandidateGroupsByStrategy({
+    return generateCandidateGroupsByStrategy({
       stage: "fallback-candidate-generation",
       systemPrompt:
         "You generate one strategy group of additional real book recommendation candidates for catalog verification. Return one complete valid JSON object only.",
