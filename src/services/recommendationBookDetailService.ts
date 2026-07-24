@@ -1,14 +1,17 @@
 import { GeneratedRecommendationBookDetail } from "../models/GeneratedRecommendationBookDetail";
-import { geminiGenerateJson } from "./geminiAIClient";
-import { recommendationBookSummaryGeminiModel } from "./geminiModelConfig";
 import { normalizeBookKey } from "./recommendationCacheService";
 
 const GOOGLE_BOOKS_SEARCH_URL = "https://www.googleapis.com/books/v1/volumes";
 const OPEN_LIBRARY_SEARCH_URL = "https://openlibrary.org/search.json";
+const GROQ_CHAT_COMPLETIONS_URL =
+  "https://api.groq.com/openai/v1/chat/completions";
 
 const CATALOG_TIMEOUT_MS = 12_000;
+const AI_TIMEOUT_MS = 35_000;
 const AI_MAX_TOKENS = 900;
-const DETAIL_CACHE_VERSION = 4;
+const DETAIL_CACHE_VERSION = 5;
+const BOOK_DETAIL_GROQ_MODEL = "openai/gpt-oss-120b";
+const GROQ_RETRIES = 2;
 
 type RecommendationBookDetailRequest = {
   title: string;
@@ -80,6 +83,24 @@ type OpenLibrarySearchResponse = {
     isbn?: string[];
     publisher?: string[];
   }>;
+};
+
+type GroqDetailResponse = {
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+    } | null;
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+};
+
+type ProviderErrorBody = {
+  error?: unknown;
+  message?: unknown;
 };
 
 type AIEnrichment = {
@@ -491,6 +512,51 @@ function parseAIEnrichment(raw: string): AIEnrichment {
   };
 }
 
+function safeProviderErrorMessage(body: ProviderErrorBody | null): string {
+  const error = body?.error;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    return cleanText(record.message) || cleanText(record.type) || "Groq error";
+  }
+
+  return cleanText(body?.message) || "Groq error";
+}
+
+function retryAfterDelayMs(response: Response, attempt: number): number {
+  const header = response.headers.get("retry-after");
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds)) {
+      return Math.max(500, Math.min(seconds * 1000, 30_000));
+    }
+
+    const dateMs = Date.parse(header);
+    if (Number.isFinite(dateMs)) {
+      return Math.max(500, Math.min(dateMs - Date.now(), 30_000));
+    }
+  }
+
+  return Math.min(750 * 2 ** attempt, 8_000);
+}
+
+function isTransientStatus(status: number): boolean {
+  return [408, 429, 500, 502, 503, 504].includes(status);
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError"
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function generateAIEnrichment(
   input: RecommendationBookDetailRequest,
   catalog: CatalogDetail,
@@ -554,46 +620,149 @@ async function generateAIEnrichment(
       2,
     ),
   ].join("\n");
-  const model = recommendationBookSummaryGeminiModel();
 
-  try {
-    console.log("[recommendation-book-detail] gemini request", {
-      title: input.title,
-      author: input.author,
-      model,
-      promptChars: userPrompt.length,
-    });
-
-    const raw = await geminiGenerateJson(systemPrompt, userPrompt, {
-      stage: "recommendation-book-detail",
-      temperature: 0.35,
-      maxOutputTokens: AI_MAX_TOKENS,
-      model,
-    });
-    const parsed = parseAIEnrichment(raw);
-
-    if (!cleanText(parsed.summary)) {
-      throw new Error("Gemini book detail stage returned no usable summary");
-    }
-
-    console.log("[recommendation-book-detail] gemini success", {
-      title: input.title,
-      author: input.author,
-      outputLength: raw.length,
-      hasSummary: true,
-      genres: parsed.genres?.length ?? 0,
-      tags: parsed.tags?.length ?? 0,
-    });
-
-    return parsed;
-  } catch (error) {
-    console.error("[recommendation-book-detail] gemini failed", {
-      title: input.title,
-      author: input.author,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
+  const apiKey = process.env.GROQ_API_KEY || "";
+  if (!apiKey) {
+    throw new Error("Missing GROQ_API_KEY environment variable");
   }
+
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= GROQ_RETRIES; attempt += 1) {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+    try {
+      console.log("[recommendation-book-detail] groq request", {
+        title: input.title,
+        author: input.author,
+        model: BOOK_DETAIL_GROQ_MODEL,
+        attempt: attempt + 1,
+        promptChars: userPrompt.length,
+      });
+
+      const response = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: BOOK_DETAIL_GROQ_MODEL,
+          temperature: 0.35,
+          max_tokens: AI_MAX_TOKENS,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: userPrompt,
+            },
+          ],
+        }),
+        signal: controller.signal,
+      });
+      const json = (await response.json().catch(() => null)) as
+        | GroqDetailResponse
+        | ProviderErrorBody
+        | null;
+      const durationMs = Date.now() - startedAt;
+
+      if (!response.ok) {
+        const message = safeProviderErrorMessage(json as ProviderErrorBody | null);
+        console.error("[recommendation-book-detail] groq failure", {
+          title: input.title,
+          author: input.author,
+          model: BOOK_DETAIL_GROQ_MODEL,
+          attempt: attempt + 1,
+          durationMs,
+          status: response.status,
+          transient: isTransientStatus(response.status),
+          message,
+        });
+
+        const error = new Error(
+          `Groq recommendation-book-detail failed with HTTP ${response.status}: ${message}`,
+        );
+        lastError = error;
+
+        if (!isTransientStatus(response.status) || attempt >= GROQ_RETRIES) {
+          throw error;
+        }
+
+        await sleep(retryAfterDelayMs(response, attempt));
+        continue;
+      }
+
+      const raw = cleanText(
+        (json as GroqDetailResponse | null)?.choices?.[0]?.message?.content,
+      );
+      const parsed = parseAIEnrichment(raw);
+
+      if (!cleanText(parsed.summary)) {
+        throw new Error("Groq book detail stage returned no usable summary");
+      }
+
+      console.log("[recommendation-book-detail] groq success", {
+        title: input.title,
+        author: input.author,
+        model: BOOK_DETAIL_GROQ_MODEL,
+        attempt: attempt + 1,
+        durationMs,
+        outputLength: raw.length,
+        hasSummary: true,
+        genres: parsed.genres?.length ?? 0,
+        tags: parsed.tags?.length ?? 0,
+        promptTokens: (json as GroqDetailResponse | null)?.usage?.prompt_tokens,
+        completionTokens: (json as GroqDetailResponse | null)?.usage
+          ?.completion_tokens,
+        totalTokens: (json as GroqDetailResponse | null)?.usage?.total_tokens,
+      });
+
+      return parsed;
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      lastError = error;
+
+      if (isAbortError(error)) {
+        console.error("[recommendation-book-detail] groq timeout", {
+          title: input.title,
+          author: input.author,
+          model: BOOK_DETAIL_GROQ_MODEL,
+          attempt: attempt + 1,
+          durationMs,
+          timeoutMs: AI_TIMEOUT_MS,
+        });
+      } else if (!(error instanceof Error && error.message.startsWith("Groq "))) {
+        console.error("[recommendation-book-detail] groq failure", {
+          title: input.title,
+          author: input.author,
+          model: BOOK_DETAIL_GROQ_MODEL,
+          attempt: attempt + 1,
+          durationMs,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      if (attempt >= GROQ_RETRIES) break;
+      if (error instanceof Error && error.message.startsWith("Groq ")) break;
+      await sleep(Math.min(750 * 2 ** attempt, 8_000));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  if (isAbortError(lastError)) {
+    throw new Error(
+      `Groq recommendation-book-detail timed out after ${AI_TIMEOUT_MS / 1000}s`,
+    );
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 function buildResponse(
@@ -603,7 +772,7 @@ function buildResponse(
 ): RecommendationBookDetailResponse {
   const summary = cleanText(ai.summary);
   if (!summary) {
-    throw new Error("Gemini book detail stage did not return a summary");
+    throw new Error("Groq book detail stage did not return a summary");
   }
 
   const genres = uniqueStrings(
