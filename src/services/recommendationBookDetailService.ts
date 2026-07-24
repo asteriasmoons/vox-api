@@ -8,8 +8,8 @@ const GROQ_CHAT_COMPLETIONS_URL =
 
 const CATALOG_TIMEOUT_MS = 12_000;
 const AI_TIMEOUT_MS = 35_000;
-const AI_MAX_TOKENS = 900;
-const DETAIL_CACHE_VERSION = 5;
+const AI_MAX_TOKENS = 1200;
+const DETAIL_CACHE_VERSION = 7;
 const BOOK_DETAIL_GROQ_MODEL = "openai/gpt-oss-120b";
 const GROQ_RETRIES = 2;
 
@@ -570,13 +570,14 @@ async function generateAIEnrichment(
     "Do not reuse the shelf summary or catalog description verbatim.",
   ].join(" ");
   const userPrompt = [
-    "Build a rich book detail payload for a recommended book in Loomey.",
+    "Build a rich book detail payload for a recommended book in Lumey.",
     "Use the catalog metadata as the source of truth for factual metadata.",
-    "Write the summary yourself in two polished short paragraphs.",
-    "Paragraph 1 should hook the reader with the premise, emotional promise, and what kind of story they are stepping into.",
-    "Paragraph 2 should explain the tone, genre texture, pacing or atmosphere, and why this book fits the recommendation shelf.",
-    "Make the copy vivid, specific, sensory, and irresistible without sounding like marketing spam.",
-    "Avoid spoilers, fake facts, fake awards, fake comparisons, and vague phrases like 'a must-read' unless the supplied data supports them.",
+    "Write the summary yourself in exactly two full paragraphs separated by \\n\\n.",
+    "For FICTION: Paragraph 1 — Drop the reader into the story. Who is at the center, what world are they in, what impossible situation are they facing? Make the reader feel the tension, the stakes, the atmosphere. Paragraph 2 — Raise the stakes. What forces are closing in? What impossible choice looms? End on a question or image that makes the reader NEED to know what happens.",
+    "For NONFICTION: Paragraph 1 — What is the big question, discovery, or argument this book tackles? Why does it matter? Ground it in something concrete — a striking fact, a real moment, a provocation that makes the reader lean in. Paragraph 2 — What will the reader see differently after reading this? What assumptions get shattered, what new lens do they gain? End on something that makes them feel like NOT reading it means missing out.",
+    "NEVER describe the book from the outside. NEVER say what 'kind of reader' would enjoy it. NEVER mention genre, tone, pacing, or audience fit in the summary. NEVER say 'perfect for fans of' or 'readers who crave'. NEVER write book-report prose like 'this book explores' or 'the author examines'. You are INSIDE the book's world or argument, not reviewing it from a distance.",
+    "Each paragraph must be at least 3 sentences long. Make the copy vivid, specific, sensory, and irresistible.",
+    "Avoid spoilers, fake facts, fake awards, fake comparisons, and vague phrases like 'a must-read'.",
     "Return strict JSON only. The summary field is required.",
     "",
     "Recommendation context:",

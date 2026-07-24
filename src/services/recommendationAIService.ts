@@ -574,7 +574,7 @@ function parseProviderCandidateGroup(input: {
   for (const [source, sourceRaw] of repairSources) {
     try {
       const group = parseCandidateGroup(sourceRaw, input.strategy, input.label);
-      console.warn("[recommendations:engine] using provider candidates without final Groq parse", {
+      console.log("[recommendations:engine] using provider candidates without final Groq parse", {
         stage: input.stage,
         strategy: input.strategy,
         source,
@@ -695,7 +695,7 @@ async function finalizeCandidateGroupWithGroq(input: {
       stage: input.stage,
     });
     if (providerGroup) {
-      console.warn("[recommendations:groq] final parse skipped for oversized prompt", {
+      console.log("[recommendations:groq] final parse skipped for oversized prompt", {
         stage: input.stage,
         strategy: input.strategy,
         promptChars: prompt.length,

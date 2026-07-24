@@ -196,7 +196,8 @@ async function fetchJson<T>(url: URL): Promise<T> {
     } catch (error) {
       lastError = error;
       if (attempt >= CATALOG_RETRIES) break;
-      await sleep(250 * (attempt + 1));
+      const is503 = error instanceof Error && error.message.includes('"status":503');
+      await sleep(is503 ? 1000 : 250 * (attempt + 1));
     } finally {
       clearTimeout(timeout);
     }
